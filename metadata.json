@@ -1,0 +1,6 @@
+{
+  "name": "Barbearia D'Biazzi",
+  "description": "Landing page and scheduling system for Barbearia D'Biazzi in Jundiaí-SP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

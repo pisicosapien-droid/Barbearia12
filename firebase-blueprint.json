@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Appointment": {
+      "title": "Appointment",
+      "description": "A scheduled barber service",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Customer full name" },
+        "phone": { "type": "string", "description": "Customer WhatsApp phone number" },
+        "serviceType": { "type": "string", "description": "Name of the service (e.g. Corte, Barba)" },
+        "barberId": { "type": "string", "description": "UID of the assigned barber" },
+        "barberName": { "type": "string", "description": "Name of the assigned barber" },
+        "date": { "type": "string", "format": "date", "description": "Service date" },
+        "time": { "type": "string", "description": "Service time" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"], "description": "Status of the appointment" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the appointment was created" },
+        "clientName": { "type": "string" },
+        "clientEmail": { "type": "string" },
+        "clientPhoto": { "type": "string" },
+        "clientId": { "type": "string" }
+      },
+      "required": ["name", "phone", "serviceType", "barberId", "barberName", "date", "time", "status", "createdAt", "clientName", "clientEmail", "clientPhoto", "clientId"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Users with access to the barber dashboard",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string", "description": "Display name of the barber" },
+        "role": { "type": "string", "enum": ["admin", "barber"] }
+      },
+      "required": ["email", "name", "role"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Website content and configurations",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "slogan": { "type": "string" },
+        "about": { "type": "string" },
+        "phone": { "type": "string" },
+        "phoneDisplay": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "zipCode": { "type": "string" },
+        "mapsEmbed": { "type": "string" },
+        "galleryImages": { "type": "array", "items": { "type": "string" } },
+        "services": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "price": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["name", "slogan", "about", "services"]
+    }
+  },
+  "firestore": {
+    "/appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Collection of all service appointments"
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Authorized users for the dashboard"
+    },
+    "/settings/website": {
+      "schema": "Settings",
+      "description": "Global website configuration"
+    }
+  }
+}

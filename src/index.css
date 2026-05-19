@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-display: "Playfair Display", serif;
+  
+  --color-gold: #c9a84c;
+  --color-gold-hover: #b08d3a;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-black text-white font-sans selection:bg-gold selection:text-black;
+  }
+}
+
+@layer components {
+  .section-container {
+    @apply max-w-5xl mx-auto px-6 py-20;
+  }
+  
+  .heading-primary {
+    @apply font-display text-3xl md:text-5xl font-bold mb-6 tracking-tight;
+  }
+  
+  .heading-secondary {
+    @apply font-display text-2xl md:text-3xl font-bold mb-8 relative inline-block after:content-[''] after:absolute after:-bottom-2 after:left-0 after:w-16 after:h-1 after:bg-gold;
+  }
+
+  /* Horizontal Scroll Gallery */
+  .galeria-scroll {
+    @apply flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory cursor-grab active:cursor-grabbing;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .galeria-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .galeria-item {
+    @apply flex-shrink-0 w-64 h-64 md:w-80 md:h-80 object-cover rounded-sm snap-start grayscale hover:grayscale-0 transition-all duration-500;
+  }
+}

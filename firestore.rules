@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+             (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && getUserData().role == 'admin') ||
+             request.auth.token.email == 'pisicosapien@gmail.com' ||
+             request.auth.token.email == 'psicosapiens@gmail.com'
+      );
+    }
+
+    function isBarber() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+             getUserData().role == 'barber';
+    }
+
+    // Public collection for barbers (no sensitive info)
+    match /public_barbers/{barberId} {
+      allow read, list: if true;
+      allow write: if isAdmin() || (isSignedIn() && request.auth.uid == barberId && isBarber());
+    }
+
+    // Public collection for tracking busy slots without PII
+    match /busy_slots/{slotId} {
+      allow read, list: if true;
+      // Admin has full access. Clients can only create if creating a corresponding appointment in the same transaction.
+      allow create: if isAdmin() || (
+        isSignedIn() && 
+        existsAfter(/databases/$(database)/documents/appointments/$(slotId)) &&
+        getAfter(/databases/$(database)/documents/appointments/$(slotId)).data.clientId == request.auth.uid
+      );
+      allow update: if isAdmin() || isBarber();
+      allow delete: if isAdmin();
+    }
+
+    // Settings Collection
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Admin Collection - Only admins can manage roles. Full view for admins only.
+    match /admins/{adminId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == adminId);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email);
+      allow create: if isSignedIn() && request.auth.uid == adminId && (
+        isAdmin() || 
+        request.auth.token.email in ['pisicosapien@gmail.com', 'psicosapiens@gmail.com']
+      );
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == adminId && 
+        request.resource.data.role == resource.data.role
+      );
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email);
+    }
+
+    // Appointments Collection
+    match /appointments/{appointmentId} {
+      allow create: if isSignedIn() && 
+                      (request.resource.data.status == 'pending') &&
+                      (request.resource.data.clientId == request.auth.uid) &&
+                      (request.resource.data.createdAt == request.time) &&
+                      exists(/databases/$(database)/documents/public_barbers/$(request.resource.data.barberId));
+      
+      allow read, list: if isAdmin() || isBarber() || (isSignedIn() && resource.data.clientId == request.auth.uid);
+
+      allow update: if isAdmin() || (isBarber() && resource.data.barberId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['confirmed', 'cancelled']) || (isSignedIn() && resource.data.clientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status == 'cancelled');
+
+      allow delete: if isAdmin();
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
