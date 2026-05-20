@@ -5,8 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: '/Barbearia12/',
     plugins: [react(), tailwindcss()],
-    base:'/barbearia12/',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
