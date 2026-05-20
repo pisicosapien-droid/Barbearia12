@@ -21,9 +21,6 @@ jobs:
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Rebuild Native Bindings
-        run: npm rebuild
-
       - name: Build Application
         run: npm run build
         env:
