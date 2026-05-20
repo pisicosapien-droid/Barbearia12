@@ -12,7 +12,7 @@ const firebaseConfig = {
   storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || "gen-lang-client-0306059686.firebasestorage.app",
   messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || "868754084635",
   appId: metaEnv.VITE_FIREBASE_APP_ID || "1:868754084635:web:7481919fca63f42a13b9be",
-  firestoreDatabaseId: metaEnv.VITE_FIREBASE_DATABASE_ID || "ai-studio-dcde57ba-6a05-4ae3-b957-9bafc9cbd399",
+  firestoreDatabaseId: metaEnv.VITE_FIREBASE_DATABASE_ID || (metaEnv.DEV ? "ai-studio-dcde57ba-6a05-4ae3-b957-9bafc9cbd399" : undefined),
 };
 
 const app = initializeApp(firebaseConfig);
