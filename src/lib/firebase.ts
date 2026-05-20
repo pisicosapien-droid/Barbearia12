@@ -5,6 +5,9 @@ import { getFirestore, doc, getDocFromServer, initializeFirestore } from 'fireba
 // Fallback dynamic configuration which allows environment variables
 const metaEnv = (import.meta as any).env || {};
 
+const isSandbox = !metaEnv.VITE_FIREBASE_PROJECT_ID || metaEnv.VITE_FIREBASE_PROJECT_ID === "gen-lang-client-0306059686";
+const defaultDatabaseId = isSandbox ? "ai-studio-dcde57ba-6a05-4ae3-b957-9bafc9cbd399" : undefined;
+
 const firebaseConfig = {
   apiKey: metaEnv.VITE_FIREBASE_API_KEY || "AIzaSyCSeI3Pz0oZXeztYYwV9je5Ya-3uumFENE",
   authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || "gen-lang-client-0306059686.firebaseapp.com",
@@ -12,7 +15,7 @@ const firebaseConfig = {
   storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || "gen-lang-client-0306059686.firebasestorage.app",
   messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || "868754084635",
   appId: metaEnv.VITE_FIREBASE_APP_ID || "1:868754084635:web:7481919fca63f42a13b9be",
-  firestoreDatabaseId: metaEnv.VITE_FIREBASE_DATABASE_ID || (metaEnv.DEV ? "ai-studio-dcde57ba-6a05-4ae3-b957-9bafc9cbd399" : undefined),
+  firestoreDatabaseId: metaEnv.VITE_FIREBASE_DATABASE_ID || defaultDatabaseId,
 };
 
 const app = initializeApp(firebaseConfig);
