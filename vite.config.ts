@@ -2,13 +2,9 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(({ mode }) => {
-  const basePath = mode === 'development'
-    ? '/'
-    : (process.env.VITE_BASE_PATH || '/Barbearia12/');
-
+export default defineConfig(() => {
   return {
-    base: basePath,
+    base: './',
     plugins: [react()],
     resolve: {
       alias: {
