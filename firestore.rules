@@ -14,7 +14,8 @@ service cloud.firestore {
       return isSignedIn() && (
              (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && getUserData().role == 'admin') ||
              request.auth.token.email == 'pisicosapien@gmail.com' ||
-             request.auth.token.email == 'psicosapiens@gmail.com'
+             request.auth.token.email == 'psicosapiens@gmail.com' ||
+             request.auth.token.email == 'murilobiazi@outlook.com'
       );
     }
 
@@ -43,6 +44,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Connection test collection
+    match /test/{testId} {
+      allow read: if true;
+    }
+
     // Settings Collection
     match /settings/{docId} {
       allow read: if true;
@@ -51,11 +57,10 @@ service cloud.firestore {
 
     // Admin Collection - Only admins can manage roles. Full view for admins only.
     match /admins/{adminId} {
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == adminId);
-      allow list: if isAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email);
+      allow read, list: if isSignedIn();
       allow create: if isSignedIn() && request.auth.uid == adminId && (
         isAdmin() || 
-        request.auth.token.email in ['pisicosapien@gmail.com', 'psicosapiens@gmail.com']
+        request.auth.token.email in ['pisicosapien@gmail.com', 'psicosapiens@gmail.com', 'murilobiazi@outlook.com']
       );
       allow update: if isAdmin() || (
         isSignedIn() && request.auth.uid == adminId && 
@@ -72,7 +77,8 @@ service cloud.firestore {
                       (request.resource.data.createdAt == request.time) &&
                       exists(/databases/$(database)/documents/public_barbers/$(request.resource.data.barberId));
       
-      allow read, list: if isAdmin() || isBarber() || (isSignedIn() && resource.data.clientId == request.auth.uid);
+      allow read: if isAdmin() || isBarber() || (isSignedIn() && (resource == null || resource.data.clientId == request.auth.uid));
+      allow list: if isAdmin() || isBarber() || (isSignedIn() && resource.data.clientId == request.auth.uid);
 
       allow update: if isAdmin() || (isBarber() && resource.data.barberId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['confirmed', 'cancelled']) || (isSignedIn() && resource.data.clientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status == 'cancelled');
 

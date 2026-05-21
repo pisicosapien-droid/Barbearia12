@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
+    <script>
+      // Garante que a página do GitHub Pages tenha barra no final do caminho para evitar erro de assets relativos (404)
+      if (window.location.hostname.endsWith('.github.io') && 
+          !window.location.pathname.endsWith('/') && 
+          !window.location.pathname.split('/').pop().includes('.')) {
+        window.location.replace(window.location.href + '/');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

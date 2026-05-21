@@ -5,24 +5,71 @@ import { getFirestore, doc, getDocFromServer, initializeFirestore } from 'fireba
 // Fallback dynamic configuration which allows environment variables
 const metaEnv = (import.meta as any).env || {};
 
-const isSandbox = !metaEnv.VITE_FIREBASE_PROJECT_ID || metaEnv.VITE_FIREBASE_PROJECT_ID === "gen-lang-client-0306059686";
+const isSandbox = !metaEnv.VITE_FIREBASE_PROJECT_ID || 
+  typeof metaEnv.VITE_FIREBASE_PROJECT_ID !== 'string' || 
+  metaEnv.VITE_FIREBASE_PROJECT_ID.trim() === "" || 
+  metaEnv.VITE_FIREBASE_PROJECT_ID === "gen-lang-client-0306059686";
 const defaultDatabaseId = isSandbox ? "ai-studio-dcde57ba-6a05-4ae3-b957-9bafc9cbd399" : undefined;
 
-const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || "AIzaSyCSeI3Pz0oZXeztYYwV9je5Ya-3uumFENE",
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || "gen-lang-client-0306059686.firebaseapp.com",
-  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0306059686",
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || "gen-lang-client-0306059686.firebasestorage.app",
-  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || "868754084635",
-  appId: metaEnv.VITE_FIREBASE_APP_ID || "1:868754084635:web:7481919fca63f42a13b9be",
-  firestoreDatabaseId: metaEnv.VITE_FIREBASE_DATABASE_ID || defaultDatabaseId,
+const getEnvValue = (val: any, fallback: string) => {
+  return (val && typeof val === "string" && val.trim() !== "") ? val : fallback;
 };
 
-const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
+const firebaseConfig = {
+  apiKey: getEnvValue(metaEnv.VITE_FIREBASE_API_KEY, "AIzaSyCSeI3Pz0oZXeztYYwV9je5Ya-3uumFENE"),
+  authDomain: getEnvValue(metaEnv.VITE_FIREBASE_AUTH_DOMAIN, "gen-lang-client-0306059686.firebaseapp.com"),
+  projectId: getEnvValue(metaEnv.VITE_FIREBASE_PROJECT_ID, "gen-lang-client-0306059686"),
+  storageBucket: getEnvValue(metaEnv.VITE_FIREBASE_STORAGE_BUCKET, "gen-lang-client-0306059686.firebasestorage.app"),
+  messagingSenderId: getEnvValue(metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID, "868754084635"),
+  appId: getEnvValue(metaEnv.VITE_FIREBASE_APP_ID, "1:868754084635:web:7481919fca63f42a13b9be"),
+  firestoreDatabaseId: (metaEnv.VITE_FIREBASE_DATABASE_ID && typeof metaEnv.VITE_FIREBASE_DATABASE_ID === "string" && metaEnv.VITE_FIREBASE_DATABASE_ID.trim() !== "") 
+    ? metaEnv.VITE_FIREBASE_DATABASE_ID 
+    : defaultDatabaseId,
+};
+
+let app;
+try {
+  app = initializeApp(firebaseConfig);
+} catch (error) {
+  console.error("Firebase App initialization failed:", error);
+}
+
+let dbInstance: any;
+try {
+  if (firebaseConfig.firestoreDatabaseId) {
+    dbInstance = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    }, firebaseConfig.firestoreDatabaseId);
+  } else {
+    dbInstance = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  }
+} catch (error) {
+  console.error("initializeFirestore failed, falling back to getFirestore:", error);
+  try {
+    dbInstance = getFirestore(app);
+  } catch (err) {
+    console.error("getFirestore failed as well:", err);
+    // Create a mock db instance to avoid breaking the bundle's export references
+    dbInstance = {
+      _isMock: true,
+    };
+  }
+}
+
+let authInstance: any;
+try {
+  authInstance = getAuth(app);
+} catch (error) {
+  console.error("getAuth failed:", error);
+  authInstance = {
+    _isMock: true,
+  };
+}
+
+export const db = dbInstance;
+export const auth = authInstance;
 export const googleProvider = new GoogleAuthProvider();
 
 export enum OperationType {

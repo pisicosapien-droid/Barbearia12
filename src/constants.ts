@@ -13,7 +13,8 @@ export const BARBERSHOP_DATA = {
   instagram: "barbeariadbiazzi",
   facebook: "barbeariadbiazzi",
   mapsEmbed: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3663.8569429446387!2d-46.88414452504825!3d-23.211831348810243!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x94cf269784196147%3A0xe5a14f494a86b1f!2sBarbearia%20D'Biazzi!5e0!3m2!1spt-BR!2sbr!4v1716060000000!5m2!1spt-BR!2sbr",
-  logoUrl: ""
+  logoUrl: "",
+  dragLogoUrl: ""
 };
 
 export const SERVICES: Service[] = [
@@ -40,7 +41,8 @@ export const OPENING_HOURS = [
 
 export const AUTHORIZED_EMAILS = [
   "pisicosapien@gmail.com",
-  "psicosapiens@gmail.com"
+  "psicosapiens@gmail.com",
+  "murilobiazi@outlook.com"
 ];
 
 export const GALLERY_IMAGES = [

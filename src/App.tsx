@@ -16,6 +16,7 @@ import {
   LogOut, 
   Settings,
   Globe,
+  Save,
   BarChart3,
   TrendingUp,
   ChevronRight,
@@ -146,6 +147,10 @@ export default function App() {
 
   // Fetch Site Settings
   useEffect(() => {
+    if (!db || db._isMock) {
+      console.warn("Firestore is mock. Skipping settings loading.");
+      return;
+    }
     let unsub: (() => void) | undefined;
     try {
       unsub = onSnapshot(doc(db, 'settings', 'website'), (snapshot) => {
@@ -166,6 +171,10 @@ export default function App() {
 
   // Fetch Barbers (Public Selection - ALWAYS open)
   useEffect(() => {
+    if (!db || db._isMock) {
+      console.warn("Firestore is mock. Skipping barbers loading.");
+      return;
+    }
     let unsub: (() => void) | undefined;
     try {
       unsub = onSnapshot(collection(db, 'public_barbers'), (snapshot) => {
@@ -194,6 +203,7 @@ export default function App() {
 
   // Fetch Staff (Full Management Data - Only for Admin/Barber)
   useEffect(() => {
+    if (!db || db._isMock) return;
     let unsub: (() => void) | undefined;
     if (isAdmin || userRole === 'barber') {
       try {
@@ -214,6 +224,7 @@ export default function App() {
 
   // Fetch Appointments (Admin/Barber specific)
   useEffect(() => {
+    if (!db || db._isMock) return;
     let unsubApps: () => void = () => {};
     
     if (user && userRole) {
@@ -248,6 +259,7 @@ export default function App() {
 
   // Fetch Busy Slots (Real-time) - Read from public busy_slots collection to avoid appointment PII exposure
   useEffect(() => {
+    if (!db || db._isMock) return;
     let unsubBusy: () => void = () => {};
 
     if (formData.date && formData.barberId) {
@@ -282,6 +294,11 @@ export default function App() {
   }, [formData.date, formData.barberId, formData.time]); // Added formData.time to inner check logic or dependency if needed
 
   useEffect(() => {
+    if (!auth || auth._isMock) {
+      console.warn("Firebase Auth is mock. Skipping auth listener.");
+      setIsAppLoading(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       try {
         if (currentUser) {
@@ -391,16 +408,18 @@ export default function App() {
     const isAuthorized = isAdmin || AUTHORIZED_EMAILS.includes(user?.email || '');
     if (!isAuthorized) {
       toast.error("Permissão negada para editar o site");
-      return;
+      return false;
     }
 
     const loadingToast = toast.loading('Salvando alterações...');
     try {
       await setDoc(doc(db, 'settings', 'website'), newData, { merge: true });
-      toast.success("Site atualizado com sucesso!", { id: loadingToast });
+      toast.success("Alterações salvas com sucesso!", { id: loadingToast });
+      return true;
     } catch (error: any) {
       console.error("Error saving settings:", error);
       toast.error("Erro ao salvar: " + (error.message || 'Sem resposta'), { id: loadingToast });
+      return false;
     }
   };
 
@@ -408,17 +427,10 @@ export default function App() {
     e.preventDefault();
     
     if (!user) {
-      const loginLoading = toast.loading('Redirecionando para login...');
-      try {
-        // Save state one last time before redirecting
-        localStorage.setItem('pending_booking', JSON.stringify(formData));
-        await login();
-        toast.success('Login realizado com sucesso!', { id: loginLoading });
-        return;
-      } catch (err) {
-        toast.error('Erro ao fazer login', { id: loginLoading });
-        return;
-      }
+      // Save state one last time before redirecting
+      localStorage.setItem('pending_booking', JSON.stringify(formData));
+      await handleLogin();
+      return;
     }
 
     if (busySlots.includes(formData.time)) {
@@ -440,7 +452,7 @@ export default function App() {
       await runTransaction(db, async (transaction) => {
         const appointmentRef = doc(db, 'appointments', slotId);
         const busySlotRef = doc(db, 'busy_slots', slotId);
-        const docSnap = await transaction.get(appointmentRef);
+        const docSnap = await transaction.get(busySlotRef);
         
         const isAvailable = !docSnap.exists() || docSnap.data().status === 'cancelled' || docSnap.data().status === 'completed';
         
@@ -527,6 +539,35 @@ export default function App() {
 
     return slots;
   }, [formData.date]);
+
+  const handleLogin = async () => {
+    const loginLoading = toast.loading('Iniciando login com Google...');
+    try {
+      await login();
+      toast.success('Login realizado com sucesso!', { id: loginLoading });
+    } catch (err: any) {
+      console.error("Erro completo no login:", err);
+      let errorMsg = 'Erro ao fazer login';
+      if (err?.code === 'auth/unauthorized-domain') {
+        errorMsg = `Este domínio (${window.location.hostname}) não está autorizado no Firebase Console. Adicione-o em: Firebase Console -> Authentication -> Settings -> Authorized Domains.`;
+      } else if (err?.code === 'auth/popup-blocked') {
+        errorMsg = 'O login popup foi bloqueado pelo seu navegador. Por favor, ative a exibição de popups para este site.';
+      } else if (err?.code === 'auth/operation-not-allowed') {
+        errorMsg = 'O provedor Google Auth não está habilitado nas configurações do seu projeto Firebase.';
+      } else if (err?.code === 'auth/popup-closed-by-user') {
+        errorMsg = 'O popup de autenticação foi fechado antes do fim do login.';
+      } else if (err?.message) {
+        errorMsg = `Não foi possível autenticar: ${err.message} (Erro: ${err.code || 'desconhecido'})`;
+      }
+      toast.error(errorMsg, { 
+        id: loginLoading, 
+        duration: 12000,
+        style: {
+          maxWidth: '550px'
+        }
+      });
+    }
+  };
 
    const handleLogout = async () => {
     await logout();
@@ -724,7 +765,7 @@ export default function App() {
               onDragEnd={(e, info) => {
                 if (info.offset.x > 110) {
                   if (!user) {
-                    login();
+                    handleLogin();
                   } else {
                     // Check authorization before entering dashboard
                     const isAuthorized = isAdmin || userRole === 'barber' || AUTHORIZED_EMAILS.includes(user.email || '');
@@ -750,18 +791,27 @@ export default function App() {
               className="flex items-center gap-3 cursor-grab active:cursor-grabbing z-50 py-2 group"
             >
               <div className="relative">
-                {siteData.logoUrl ? (
+                {siteData.dragLogoUrl ? (
+                  <img 
+                    src={siteData.dragLogoUrl} 
+                    className={cn(
+                      "w-[43.2px] h-[43.2px] object-cover rounded-full transition-transform duration-300",
+                      logoDragX > 10 ? "rotate-45" : "rotate-0"
+                    )} 
+                    alt="Logo Arrastável"
+                  />
+                ) : siteData.logoUrl ? (
                   <img 
                     src={siteData.logoUrl} 
                     className={cn(
-                      "w-6 h-6 object-contain transition-transform duration-300",
+                      "w-[43.2px] h-[43.2px] object-contain transition-transform duration-300",
                       logoDragX > 10 ? "rotate-45" : "rotate-0"
                     )} 
                     alt="Logo"
                   />
                 ) : (
                   <Scissors className={cn(
-                    "text-gold w-6 h-6 transition-transform duration-300",
+                    "text-gold w-[43.2px] h-[43.2px] transition-transform duration-300",
                     logoDragX > 10 ? "rotate-45" : "rotate-0"
                   )} />
                 )}
@@ -870,8 +920,11 @@ export default function App() {
           <motion.img 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            src="/LOGO.png" 
-            className="w-28 h-28 mx-auto mb-10 grayscale invert brightness-200 drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]"
+            src={siteData.logoUrl || "/LOGO.png"} 
+            className={cn(
+              "w-28 h-28 mx-auto mb-10 object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]",
+              !siteData.logoUrl && "grayscale invert brightness-200"
+            )}
             alt="Logo"
             onError={(e: any) => e.target.style.display = 'none'}
           />
@@ -928,7 +981,7 @@ export default function App() {
           </motion.div>
         </div>
 
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 animate-bounce flex flex-col items-center gap-1 opacity-40">
+        <div className="absolute bottom-10 left-0 right-0 mx-auto w-fit animate-bounce flex flex-col items-center gap-1 opacity-40 z-30">
            <span className="text-[10px] uppercase tracking-widest font-bold">Scroll</span>
            <div className="w-[1px] h-12 bg-white" />
         </div>
@@ -1391,7 +1444,7 @@ export default function App() {
            <p className="text-[10px] uppercase tracking-[0.4em] text-white/10 font-bold selection:bg-transparent">
              © 2025 
              <button 
-               onClick={!user ? login : () => {
+               onClick={!user ? handleLogin : () => {
                  const isAuth = isAdmin || userRole === 'barber' || AUTHORIZED_EMAILS.includes(user?.email || '');
                  if (isAuth) toggleDashboardView(true);
                }}
@@ -1509,6 +1562,193 @@ function DashboardView({
     }: any) {
       const calendarMonth = useState(new Date())[0]; // Logic preserved for structure, but set via setter below
       const [currentMonth, setCurrentMonth] = useState(new Date());
+
+      const [draftSiteData, setDraftSiteData] = useState(() => siteData);
+      const [draftServices, setDraftServices] = useState(() => siteServices);
+      const [draftGallery, setDraftGallery] = useState(() => siteGallery);
+
+      const isTabDirty = (tab: string) => {
+        switch (tab) {
+          case 'geral':
+            return draftSiteData.name !== siteData.name ||
+                   draftSiteData.phone !== siteData.phone ||
+                   draftSiteData.phoneDisplay !== siteData.phoneDisplay ||
+                   draftSiteData.email !== siteData.email ||
+                   draftSiteData.instagram !== siteData.instagram ||
+                   draftSiteData.logoUrl !== siteData.logoUrl ||
+                   draftSiteData.dragLogoUrl !== siteData.dragLogoUrl ||
+                   draftSiteData.address !== siteData.address ||
+                   draftSiteData.mapsEmbed !== siteData.mapsEmbed;
+          case 'hero':
+            return draftSiteData.slogan !== siteData.slogan ||
+                   draftGallery[0] !== siteGallery[0];
+          case 'servicos':
+            return JSON.stringify(draftServices) !== JSON.stringify(siteServices);
+          case 'sobre':
+            return draftSiteData.about !== siteData.about ||
+                   draftGallery[1] !== siteGallery[1];
+          case 'galeria':
+            return JSON.stringify(draftGallery.slice(2)) !== JSON.stringify(siteGallery.slice(2));
+          case 'contato':
+            return draftSiteData.instagram !== siteData.instagram;
+          default:
+            return false;
+        }
+      };
+
+      const hasAnyUnsavedChanges = () => {
+        return isTabDirty('geral') || 
+               isTabDirty('hero') || 
+               isTabDirty('servicos') || 
+               isTabDirty('sobre') || 
+               isTabDirty('galeria') || 
+               isTabDirty('contato');
+      };
+
+      const confirmNavigation = () => {
+        if (hasAnyUnsavedChanges()) {
+          return window.confirm("Você tem alterações não salvas. Se você sair agora, suas alterações serão perdidas. Deseja sair mesmo assim?");
+        }
+        return true;
+      };
+
+      const handleSetAdminTab = (newTab: typeof adminTab) => {
+        if (confirmNavigation()) {
+          setAdminTab(newTab);
+        }
+      };
+
+      const handleSetSiteTab = (newTab: typeof siteTab) => {
+        if (isTabDirty(siteTab)) {
+          if (window.confirm("Você alterou as configurações nesta aba, mas não as salvou. Deseja descartar as alterações e mudar de aba?")) {
+            if (siteTab === 'geral' || siteTab === 'hero' || siteTab === 'sobre' || siteTab === 'contato') {
+              setDraftSiteData({...siteData});
+            }
+            if (siteTab === 'servicos') {
+              setDraftServices([...siteServices]);
+            }
+            if (siteTab === 'galeria') {
+              setDraftGallery([...siteGallery]);
+            }
+            setSiteTab(newTab);
+          }
+        } else {
+          setSiteTab(newTab);
+        }
+      };
+
+      const handleBackToSite = () => {
+        if (confirmNavigation()) {
+          setIsDashboardView(false);
+        }
+      };
+
+      const handleAdminLogout = async () => {
+        if (confirmNavigation()) {
+          await handleLogout();
+        }
+      };
+
+      // Keep drafts in sync when DB loads or changes in background, if they are not dirty
+      useEffect(() => {
+        if (!isTabDirty('geral')) {
+          setDraftSiteData(prev => ({
+            ...prev,
+            name: siteData.name,
+            phone: siteData.phone,
+            phoneDisplay: siteData.phoneDisplay,
+            email: siteData.email,
+            instagram: siteData.instagram,
+            logoUrl: siteData.logoUrl,
+            dragLogoUrl: siteData.dragLogoUrl,
+            address: siteData.address,
+            mapsEmbed: siteData.mapsEmbed,
+          }));
+        }
+      }, [siteData.name, siteData.phone, siteData.phoneDisplay, siteData.email, siteData.instagram, siteData.logoUrl, siteData.dragLogoUrl, siteData.address, siteData.mapsEmbed]);
+
+      useEffect(() => {
+        if (!isTabDirty('hero') && !isTabDirty('sobre')) {
+          setDraftSiteData(prev => ({
+            ...prev,
+            slogan: siteData.slogan,
+            about: siteData.about,
+          }));
+        }
+      }, [siteData.slogan, siteData.about]);
+
+      useEffect(() => {
+        if (!isTabDirty('servicos')) {
+          setDraftServices(siteServices);
+        }
+      }, [siteServices]);
+
+      useEffect(() => {
+        if (!isTabDirty('galeria') && !isTabDirty('hero') && !isTabDirty('sobre')) {
+          setDraftGallery(siteGallery);
+        }
+      }, [siteGallery]);
+
+      // Page unload warning
+      useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+          if (hasAnyUnsavedChanges()) {
+            e.preventDefault();
+            e.returnValue = "Você tem alterações não salvas que serão perdidas.";
+            return e.returnValue;
+          }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => {
+          window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
+      }, [draftSiteData, draftServices, draftGallery, siteData, siteServices, siteGallery]);
+
+      const handleSaveGeral = async () => {
+        await saveSettings({
+          name: draftSiteData.name,
+          phone: draftSiteData.phone,
+          phoneDisplay: draftSiteData.phoneDisplay,
+          email: draftSiteData.email,
+          instagram: draftSiteData.instagram,
+          logoUrl: draftSiteData.logoUrl,
+          dragLogoUrl: draftSiteData.dragLogoUrl,
+          address: draftSiteData.address,
+          mapsEmbed: draftSiteData.mapsEmbed,
+        });
+      };
+
+      const handleSaveHero = async () => {
+        await saveSettings({
+          slogan: draftSiteData.slogan,
+          galleryImages: draftGallery,
+        });
+      };
+
+      const handleSaveServicos = async () => {
+        await saveSettings({
+          services: draftServices,
+        });
+      };
+
+      const handleSaveSobre = async () => {
+        await saveSettings({
+          about: draftSiteData.about,
+          galleryImages: draftGallery,
+        });
+      };
+
+      const handleSaveGaleria = async () => {
+        await saveSettings({
+          galleryImages: draftGallery,
+        });
+      };
+
+      const handleSaveContato = async () => {
+        await saveSettings({
+          instagram: draftSiteData.instagram,
+        });
+      };
     
       const daysInMonth = useMemo(() => eachDayOfInterval({
         start: startOfMonth(currentMonth),
@@ -1584,13 +1824,13 @@ function DashboardView({
                 </button>
               )}
               <button 
-                onClick={() => setIsDashboardView(false)}
+                onClick={handleBackToSite}
                 className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm transition-all border border-white/10"
               >
                 <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-pulse" /> Ver Site
               </button>
               <button 
-                onClick={handleLogout}
+                onClick={handleAdminLogout}
                 className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm transition-all border border-red-500/10"
               >
                 <LogOut className="w-4 h-4" /> Sair
@@ -1601,7 +1841,7 @@ function DashboardView({
         {/* Dashboard Navigation */}
         <nav className="flex overflow-x-auto no-scrollbar gap-1 mb-8 md:mb-10 bg-zinc-900/50 p-1 rounded-sm border border-white/5 backdrop-blur-md">
            <button 
-             onClick={() => setAdminTab('appointments')}
+             onClick={() => handleSetAdminTab('appointments')}
              className={cn(
                "flex-1 md:flex-none whitespace-nowrap px-4 md:px-8 py-3 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm transition-all flex items-center justify-center gap-2 md:gap-3",
                adminTab === 'appointments' ? 'bg-gold text-black shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/5'
@@ -1612,7 +1852,7 @@ function DashboardView({
            {isAdmin && (
              <>
                <button 
-                 onClick={() => setAdminTab('site')}
+                  onClick={() => handleSetAdminTab('site')}
                  className={cn(
                    "flex-1 md:flex-none whitespace-nowrap px-4 md:px-8 py-3 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm transition-all flex items-center justify-center gap-2 md:gap-3",
                    adminTab === 'site' ? 'bg-gold text-black shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/5'
@@ -1621,7 +1861,7 @@ function DashboardView({
                  <Globe className="w-3.5 h-3.5 md:w-4 md:h-4" /> Site
                </button>
                <button 
-                 onClick={() => setAdminTab('barbers')}
+                 onClick={() => handleSetAdminTab('barbers')}
                  className={cn(
                    "flex-1 md:flex-none whitespace-nowrap px-4 md:px-8 py-3 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm transition-all flex items-center justify-center gap-2 md:gap-3",
                    adminTab === 'barbers' ? 'bg-gold text-black shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/5'
@@ -1630,7 +1870,7 @@ function DashboardView({
                  <User className="w-3.5 h-3.5 md:w-4 md:h-4" /> Equipe
                </button>
                <button 
-                 onClick={() => setAdminTab('reports')}
+                 onClick={() => handleSetAdminTab('reports')}
                  className={cn(
                    "flex-1 md:flex-none whitespace-nowrap px-4 md:px-8 py-3 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm transition-all flex items-center justify-center gap-2 md:gap-3",
                    adminTab === 'reports' ? 'bg-gold text-black shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/5'
@@ -1916,7 +2156,7 @@ function DashboardView({
                   {(['geral', 'hero', 'servicos', 'sobre', 'galeria', 'contato'] as const).map(tab => (
                     <button
                       key={tab}
-                      onClick={() => setSiteTab(tab)}
+                      onClick={() => handleSetSiteTab(tab)}
                       className={cn(
                         "px-4 py-2 text-[10px] uppercase font-bold tracking-widest rounded-sm transition-all whitespace-nowrap",
                         siteTab === tab ? 'bg-gold/10 text-gold' : 'text-white/30 hover:text-white'
@@ -1933,289 +2173,609 @@ function DashboardView({
 
                <div className="bg-zinc-900/50 p-4 md:p-8 rounded-sm border border-white/5 min-h-[400px]">
                   {siteTab === 'geral' && (
-                    <div className="grid md:grid-cols-2 gap-6 md:gap-8">
-                       <div className="space-y-4">
-                          <h3 className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-gold mb-4">Dados da Barbearia</h3>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">Nome</label>
-                             <input 
-                               value={siteData.name}
-                               onChange={e => {
-                                  const newData = {...siteData, name: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings({ name: e.target.value });
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all text-sm"
-                             />
-                          </div>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">WhatsApp p/ Link (Somente números)</label>
-                             <input 
-                               placeholder="Ex: 11999999999"
-                               value={siteData.phone}
-                               onChange={e => {
-                                  const newData = {...siteData, phone: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings({ phone: e.target.value });
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all text-sm"
-                             />
-                          </div>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">WhatsApp p/ Exibição (Texto)</label>
-                             <input 
-                               placeholder="Ex: (11) 99999-9999"
-                               value={siteData.phoneDisplay}
-                               onChange={e => {
-                                  const newData = {...siteData, phoneDisplay: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings({ phoneDisplay: e.target.value });
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all text-sm"
-                             />
-                          </div>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">E-mail</label>
-                             <input 
-                               value={siteData.email || ''}
-                               onChange={e => {
-                                  const newData = {...siteData, email: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings({ email: e.target.value });
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all text-sm"
-                             />
-                          </div>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">Instagram (Username sem @)</label>
-                             <input 
-                               value={siteData.instagram || ''}
-                               onChange={e => {
-                                  const newData = {...siteData, instagram: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings({ instagram: e.target.value });
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all text-sm"
-                             />
-                          </div>
-                       </div>
-                       <div className="space-y-4">
-                          <div className="space-y-4 mb-8">
-                             <h3 className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-gold mb-4">Logo da Barbearia</h3>
-                             <ImageUploader 
-                               label="Imagem do Logo"
-                               aspectRatio={1 / 1}
-                               initialImage={siteData.logoUrl || ''}
-                               onImageCropped={(dataUrl) => {
-                                  const newData = {...siteData, logoUrl: dataUrl};
-                                  setSiteData(newData);
-                                  saveSettings({ logoUrl: dataUrl });
-                               }}
-                             />
-                          </div>
-                          <h3 className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-gold mb-4">Endereço e Mapa</h3>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">Endereço Completo</label>
-                             <textarea 
-                               rows={3}
-                               value={siteData.address}
-                               onChange={e => {
-                                  const newData = {...siteData, address: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings({ address: e.target.value });
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all text-sm"
-                             />
-                          </div>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">Link Embed Google Maps (src do iframe)</label>
-                             <textarea 
-                               rows={4}
-                               value={siteData.mapsEmbed}
-                               onChange={e => {
-                                  const newData = {...siteData, mapsEmbed: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings({ mapsEmbed: e.target.value });
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all text-[8px] font-mono"
-                             />
-                             <p className="text-[8px] text-white/20 mt-1 uppercase">Vá no Google Maps &gt; Compartilhar &gt; Incorporar mapa e copie apenas o link dentro de 'src'</p>
-                          </div>
-                       </div>
+                    <div className="space-y-6 animate-in fade-in duration-300">
+                      <div className="grid md:grid-cols-2 gap-6 md:gap-8">
+                         <div className="space-y-4">
+                            <h3 className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-gold mb-4">Dados da Barbearia</h3>
+                            <div>
+                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 flex justify-between items-center font-bold">
+                                 <span>Nome</span>
+                                 {draftSiteData.name !== siteData.name && (
+                                   <span className="text-amber-500 text-[8px] tracking-normal lowercase font-normal flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                   </span>
+                                 )}
+                               </label>
+                               <input 
+                                 value={draftSiteData.name}
+                                 onChange={e => {
+                                    setDraftSiteData(prev => ({...prev, name: e.target.value}));
+                                 }}
+                                 className={cn(
+                                   "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                                   draftSiteData.name !== siteData.name 
+                                     ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                     : "border-white/10 focus:border-gold"
+                                 )}
+                               />
+                            </div>
+                            <div>
+                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 flex justify-between items-center font-bold">
+                                 <span>WhatsApp p/ Link (Somente números)</span>
+                                 {draftSiteData.phone !== siteData.phone && (
+                                   <span className="text-amber-500 text-[8px] tracking-normal lowercase font-normal flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                   </span>
+                                 )}
+                               </label>
+                               <input 
+                                 placeholder="Ex: 11999999999"
+                                 value={draftSiteData.phone}
+                                 onChange={e => {
+                                    setDraftSiteData(prev => ({...prev, phone: e.target.value}));
+                                 }}
+                                 className={cn(
+                                   "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                                   draftSiteData.phone !== siteData.phone 
+                                     ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                     : "border-white/10 focus:border-gold"
+                                 )}
+                               />
+                            </div>
+                            <div>
+                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 flex justify-between items-center font-bold">
+                                 <span>WhatsApp p/ Exibição (Texto)</span>
+                                 {draftSiteData.phoneDisplay !== siteData.phoneDisplay && (
+                                   <span className="text-amber-500 text-[8px] tracking-normal lowercase font-normal flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                   </span>
+                                 )}
+                               </label>
+                               <input 
+                                 placeholder="Ex: (11) 99999-9999"
+                                 value={draftSiteData.phoneDisplay}
+                                 onChange={e => {
+                                    setDraftSiteData(prev => ({...prev, phoneDisplay: e.target.value}));
+                                 }}
+                                 className={cn(
+                                   "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                                   draftSiteData.phoneDisplay !== siteData.phoneDisplay 
+                                     ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                     : "border-white/10 focus:border-gold"
+                                 )}
+                               />
+                            </div>
+                            <div>
+                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 flex justify-between items-center font-bold">
+                                 <span>E-mail</span>
+                                 {draftSiteData.email !== siteData.email && (
+                                   <span className="text-amber-500 text-[8px] tracking-normal lowercase font-normal flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                   </span>
+                                 )}
+                               </label>
+                               <input 
+                                 value={draftSiteData.email || ''}
+                                 onChange={e => {
+                                    setDraftSiteData(prev => ({...prev, email: e.target.value}));
+                                 }}
+                                 className={cn(
+                                   "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                                   draftSiteData.email !== siteData.email 
+                                     ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                     : "border-white/10 focus:border-gold"
+                                 )}
+                               />
+                            </div>
+                            <div>
+                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 flex justify-between items-center font-bold">
+                                 <span>Instagram (Username sem @)</span>
+                                 {draftSiteData.instagram !== siteData.instagram && (
+                                   <span className="text-amber-500 text-[8px] tracking-normal lowercase font-normal flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                   </span>
+                                 )}
+                               </label>
+                               <input 
+                                 value={draftSiteData.instagram || ''}
+                                 onChange={e => {
+                                    setDraftSiteData(prev => ({...prev, instagram: e.target.value}));
+                                 }}
+                                 className={cn(
+                                   "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                                   draftSiteData.instagram !== siteData.instagram 
+                                     ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                     : "border-white/10 focus:border-gold"
+                                 )}
+                               />
+                            </div>
+                         </div>
+                         <div className="space-y-4">
+                            <div className="space-y-4 mb-8">
+                               <div className="flex justify-between items-center mb-1">
+                                  <h3 className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-gold">Logo da Barbearia</h3>
+                                  {draftSiteData.logoUrl !== siteData.logoUrl && (
+                                     <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                        ● não salvo
+                                     </span>
+                                  )}
+                               </div>
+                               <ImageUploader 
+                                 label="Imagem do Logo"
+                                 aspectRatio={1 / 1}
+                                 initialImage={draftSiteData.logoUrl || ''}
+                                 onImageCropped={(dataUrl) => {
+                                    setDraftSiteData(prev => ({...prev, logoUrl: dataUrl}));
+                                 }}
+                               />
+                            </div>
+                            <div className="space-y-4 mb-8">
+                               <div className="flex justify-between items-center mb-1">
+                                  <h3 className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-gold">Logo Arrastável do Menu (Antiga Tesoura)</h3>
+                                  {draftSiteData.dragLogoUrl !== siteData.dragLogoUrl && (
+                                     <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                        ● não salvo
+                                     </span>
+                                  )}
+                               </div>
+                               <ImageUploader 
+                                 label="Imagem do Logo Arrastável"
+                                 aspectRatio={1 / 1}
+                                 initialImage={draftSiteData.dragLogoUrl || ''}
+                                 onImageCropped={(dataUrl) => {
+                                    setDraftSiteData(prev => ({...prev, dragLogoUrl: dataUrl}));
+                                 }}
+                               />
+                            </div>
+                            <h3 className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-gold mb-4">Endereço e Mapa</h3>
+                            <div>
+                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 flex justify-between items-center font-bold">
+                                 <span>Endereço Completo</span>
+                                 {draftSiteData.address !== siteData.address && (
+                                   <span className="text-amber-500 text-[8px] tracking-normal lowercase font-normal flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                   </span>
+                                 )}
+                               </label>
+                               <textarea 
+                                 rows={3}
+                                 value={draftSiteData.address}
+                                 onChange={e => {
+                                    setDraftSiteData(prev => ({...prev, address: e.target.value}));
+                                 }}
+                                 className={cn(
+                                   "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                                   draftSiteData.address !== siteData.address 
+                                     ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                     : "border-white/10 focus:border-gold"
+                                 )}
+                               />
+                            </div>
+                            <div>
+                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 flex justify-between items-center font-bold">
+                                 <span>Link Embed Google Maps (src do iframe)</span>
+                                 {draftSiteData.mapsEmbed !== siteData.mapsEmbed && (
+                                   <span className="text-amber-500 text-[8px] tracking-normal lowercase font-normal flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                   </span>
+                                 )}
+                               </label>
+                               <textarea 
+                                 rows={4}
+                                 value={draftSiteData.mapsEmbed}
+                                 onChange={e => {
+                                    setDraftSiteData(prev => ({...prev, mapsEmbed: e.target.value}));
+                                 }}
+                                 className={cn(
+                                   "w-full bg-black border p-3 rounded-sm focus:border-gold outline-none transition-all text-[8px] font-mono",
+                                   draftSiteData.mapsEmbed !== siteData.mapsEmbed 
+                                     ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                     : "border-white/10 focus:border-gold"
+                                 )}
+                               />
+                               <p className="text-[8px] text-white/20 mt-1 uppercase">Vá no Google Maps &gt; Compartilhar &gt; Incorporar mapa e copie apenas o link dentro de 'src'</p>
+                            </div>
+                         </div>
+                      </div>
+
+                      {/* Save Button for Geral Tab */}
+                      <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-4 mt-8">
+                         <div className="text-left">
+                            {isTabDirty('geral') ? (
+                              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Você tem alterações não salvas nesta seção.
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Todas as alterações estão salvas.
+                              </p>
+                            )}
+                         </div>
+                         <div className="flex gap-3 w-full sm:w-auto">
+                           <button
+                             onClick={() => {
+                               setDraftSiteData(prev => ({
+                                 ...prev,
+                                 name: siteData.name,
+                                 phone: siteData.phone,
+                                 phoneDisplay: siteData.phoneDisplay,
+                                 email: siteData.email,
+                                 instagram: siteData.instagram,
+                                 logoUrl: siteData.logoUrl,
+                                 dragLogoUrl: siteData.dragLogoUrl,
+                                 address: siteData.address,
+                                 mapsEmbed: siteData.mapsEmbed,
+                               }));
+                               toast.success("Alterações descartadas");
+                             }}
+                             disabled={!isTabDirty('geral')}
+                             className="px-5 py-2.5 border border-white/5 text-white/40 disabled:opacity-30 text-[9px] font-bold uppercase tracking-widest rounded-sm hover:text-white hover:border-white/10 transition-all text-center"
+                           >
+                             Descartar
+                           </button>
+                           <button
+                             onClick={handleSaveGeral}
+                             disabled={!isTabDirty('geral')}
+                             className={cn(
+                               "px-6 py-2.5 text-black text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all text-center flex items-center justify-center gap-2",
+                               isTabDirty('geral') 
+                                 ? "bg-gold hover:bg-white shadow-[0_0_15px_rgba(255,215,0,0.25)]" 
+                                 : "bg-zinc-800 text-white/30 cursor-not-allowed border border-white/5"
+                             )}
+                           >
+                              <Save className="w-3.5 h-3.5" /> Salvar Alterações
+                           </button>
+                         </div>
+                      </div>
                     </div>
                   )}
 
-                   {siteTab === 'hero' && (
-                    <div className="space-y-6">
-                       <div>
-                          <div className="flex justify-between items-center mb-2">
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 block font-bold">Slogan Principal</label>
-                             <button 
-                               onClick={() => saveSettings({ slogan: siteData.slogan })}
-                               className="text-[9px] font-bold uppercase tracking-widest text-gold hover:text-white transition-colors"
-                             >
-                               Salvar Slogan
-                             </button>
-                          </div>
-                          <input 
-                            value={siteData.slogan}
-                            onChange={e => {
-                               const newData = {...siteData, slogan: e.target.value};
-                               setSiteData(newData);
-                            }}
-                            className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none transition-all"
-                          />
-                       </div>
-                       <div>
-                          <ImageUploader 
-                            label="Imagem de Fundo do Hero"
-                            aspectRatio={16 / 9}
-                            initialImage={siteGallery[0]}
-                            onImageCropped={(dataUrl) => {
-                               const newGallery = [...siteGallery];
-                               newGallery[0] = dataUrl;
-                               setSiteGallery(newGallery);
-                               saveSettings({ galleryImages: newGallery });
-                            }}
-                          />
-                       </div>
+                  {siteTab === 'hero' && (
+                    <div className="space-y-6 max-w-2xl animate-in fade-in duration-300">
+                      <div>
+                         <div className="flex justify-between items-center mb-2">
+                            <label className="text-[9px] uppercase tracking-widest text-white/30 block font-bold">Slogan Principal</label>
+                            {draftSiteData.slogan !== siteData.slogan && (
+                              <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                ● não salvo
+                              </span>
+                            )}
+                         </div>
+                         <input 
+                           value={draftSiteData.slogan}
+                           onChange={e => {
+                              setDraftSiteData(prev => ({ ...prev, slogan: e.target.value }));
+                           }}
+                           className={cn(
+                             "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                             draftSiteData.slogan !== siteData.slogan 
+                               ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                               : "border-white/10 focus:border-gold"
+                           )}
+                         />
+                      </div>
+                      <div>
+                         <div className="flex justify-between items-center mb-2">
+                            <label className="text-[9px] uppercase tracking-widest text-white/30 block font-bold">Imagem de Fundo do Hero</label>
+                            {draftGallery[0] !== siteGallery[0] && (
+                              <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                ● não salvo
+                              </span>
+                            )}
+                         </div>
+                         <ImageUploader 
+                           label="Imagem de Fundo do Hero"
+                           aspectRatio={16 / 9}
+                           initialImage={draftGallery[0] || ''}
+                           onImageCropped={(dataUrl) => {
+                              const newGallery = [...draftGallery];
+                              newGallery[0] = dataUrl;
+                              setDraftGallery(newGallery);
+                           }}
+                         />
+                      </div>
+
+                      {/* Save Button for Hero Tab */}
+                      <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-4 mt-8">
+                         <div className="text-left">
+                            {isTabDirty('hero') ? (
+                              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Você tem alterações não salvas nesta seção.
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Todas as alterações estão salvas.
+                              </p>
+                            )}
+                         </div>
+                         <div className="flex gap-3 w-full sm:w-auto">
+                           <button
+                             onClick={() => {
+                               setDraftSiteData(prev => ({ ...prev, slogan: siteData.slogan }));
+                               const newGallery = [...draftGallery];
+                               newGallery[0] = siteGallery[0];
+                               setDraftGallery(newGallery);
+                               toast.success("Alterações descartadas");
+                             }}
+                             disabled={!isTabDirty('hero')}
+                             className="px-5 py-2.5 border border-white/5 text-white/40 disabled:opacity-30 text-[9px] font-bold uppercase tracking-widest rounded-sm hover:text-white hover:border-white/10 transition-all text-center"
+                           >
+                             Descartar
+                           </button>
+                           <button
+                             onClick={handleSaveHero}
+                             disabled={!isTabDirty('hero')}
+                             className={cn(
+                               "px-6 py-2.5 text-black text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all text-center flex items-center justify-center gap-2",
+                               isTabDirty('hero') 
+                                 ? "bg-gold hover:bg-white shadow-[0_0_15px_rgba(255,215,0,0.25)]" 
+                                 : "bg-zinc-800 text-white/30 cursor-not-allowed border border-white/5"
+                             )}
+                           >
+                              <Save className="w-3.5 h-3.5" /> Salvar Alterações
+                           </button>
+                         </div>
+                      </div>
                     </div>
                   )}
 
                   {siteTab === 'servicos' && (
-                    <div className="space-y-6">
-                       <div className="flex justify-between items-center">
-                          <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Gerenciar Serviços</h3>
-                          <button 
-                             onClick={() => saveSettings({ services: siteServices })}
-                             className="px-6 py-2 bg-gold text-black text-[9px] font-bold uppercase tracking-widest rounded-sm hover:bg-white transition-all shadow-[0_0_15px_rgba(255,215,0,0.2)]"
-                          >
-                             Salvar Todos os Serviços
-                          </button>
-                       </div>
-                       {siteServices.map((s: any, i: number) => (
-                         <div key={i} className="bg-black/40 p-6 rounded-sm border border-white/5 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                               <div>
-                                  <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 block font-bold">Nome do Serviço</label>
-                                  <input 
-                                    value={s.name}
-                                    onChange={e => {
-                                      const newServices = [...siteServices];
-                                      newServices[i] = {...s, name: e.target.value};
-                                      setSiteServices(newServices);
-                                    }}
-                                    className="w-full bg-black border border-white/10 p-2 rounded-sm text-sm"
-                                  />
-                               </div>
-                               <div>
-                                  <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 block font-bold">Preço</label>
-                                  <input 
-                                    value={s.price}
-                                    placeholder="Ex: 50 ou R$ 50,00"
-                                    onBlur={e => {
-                                      const val = e.target.value;
-                                      const numMatch = val.replace(/[^\d,]/g, '').replace(',', '.').replace(/(\.)(\d*)\1/g, '$1$2');
-                                      const num = parseFloat(numMatch);
-                                      if (!isNaN(num)) {
-                                         const normalized = `R$ ${num.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-                                         const newServices = [...siteServices];
-                                         newServices[i] = {...s, price: normalized};
-                                         setSiteServices(newServices);
-                                      }
-                                    }}
-                                    onChange={e => {
-                                      const newServices = [...siteServices];
-                                      newServices[i] = {...s, price: e.target.value};
-                                      setSiteServices(newServices);
-                                    }}
-                                    className="w-full bg-black border border-white/10 p-2 rounded-sm text-sm"
-                                  />
-                               </div>
-                            </div>
-                            <div>
-                               <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 block font-bold">Descrição</label>
-                               <input 
-                                 value={s.description}
-                                 onChange={e => {
-                                   const newServices = [...siteServices];
-                                   newServices[i] = {...s, description: e.target.value};
-                                   setSiteServices(newServices);
-                                 }}
-                                 className="w-full bg-black border border-white/10 p-2 rounded-sm text-sm"
-                               />
-                            </div>
+                    <div className="space-y-6 animate-in fade-in duration-300">
+                      <div className="flex justify-between items-center">
+                         <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Gerenciar Serviços</h3>
+                         <button 
+                            onClick={handleSaveServicos}
+                            disabled={!isTabDirty('servicos')}
+                            className={cn(
+                              "px-6 py-2 text-black text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all",
+                              isTabDirty('servicos')
+                                ? "bg-gold hover:bg-white shadow-[0_0_15px_rgba(255,215,0,0.2)]"
+                                : "bg-zinc-800 text-white/30 cursor-not-allowed border border-white/5"
+                            )}
+                         >
+                            Salvar Todos os Serviços
+                         </button>
+                      </div>
+                      {draftServices.map((s: any, i: number) => {
+                        const nameChanged = s.name !== (siteServices[i]?.name || '');
+                        const priceChanged = s.price !== (siteServices[i]?.price || '');
+                        const descChanged = s.description !== (siteServices[i]?.description || '');
+                        const serviceChanged = nameChanged || priceChanged || descChanged;
+
+                        return (
+                        <div key={i} className={cn(
+                          "p-6 rounded-sm border transition-all space-y-4",
+                          serviceChanged 
+                            ? "bg-amber-500/5 border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.03)]" 
+                            : "bg-black/40 border-white/5"
+                        )}>
+                           <div className="flex justify-between items-center mb-1">
+                              <span className="text-[10px] uppercase tracking-wider text-white/50 font-bold">Serviço #{i+1}</span>
+                              {serviceChanged && (
+                                 <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" /> não salvo
+                                 </span>
+                              )}
+                           </div>
+                           <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                 <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 block font-bold">Nome do Serviço</label>
+                                 <input 
+                                   value={s.name}
+                                   onChange={e => {
+                                     const newServices = [...draftServices];
+                                     newServices[i] = {...s, name: e.target.value};
+                                     setDraftServices(newServices);
+                                   }}
+                                   className={cn(
+                                     "w-full bg-black border p-2 rounded-sm text-sm outline-none transition-all",
+                                     nameChanged ? "border-amber-500/50 focus:border-amber-500" : "border-white/10 focus:border-gold"
+                                   )}
+                                 />
+                              </div>
+                              <div>
+                                 <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 block font-bold">Preço</label>
+                                 <input 
+                                   value={s.price}
+                                   placeholder="Ex: 50 ou R$ 50,00"
+                                   onBlur={e => {
+                                     const val = e.target.value;
+                                     const numMatch = val.replace(/[^0-9,]/g, '').replace(',', '.');
+                                     const num = parseFloat(numMatch);
+                                     if (!isNaN(num)) {
+                                        const normalized = 'R$ ' + num.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                        const newServices = [...draftServices];
+                                        newServices[i] = {...s, price: normalized};
+                                        setDraftServices(newServices);
+                                     }
+                                   }}
+                                   onChange={e => {
+                                     const newServices = [...draftServices];
+                                     newServices[i] = {...s, price: e.target.value};
+                                     setDraftServices(newServices);
+                                   }}
+                                   className={cn(
+                                     "w-full bg-black border p-2 rounded-sm text-sm outline-none transition-all",
+                                     priceChanged ? "border-amber-500/50 focus:border-amber-500" : "border-white/10 focus:border-gold"
+                                   )}
+                                 />
+                              </div>
+                           </div>
+                           <div>
+                              <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 block font-bold">Descrição</label>
+                              <input 
+                                value={s.description}
+                                onChange={e => {
+                                  const newServices = [...draftServices];
+                                  newServices[i] = {...s, description: e.target.value};
+                                  setDraftServices(newServices);
+                                }}
+                                className={cn(
+                                  "w-full bg-black border p-2 rounded-sm text-sm outline-none transition-all",
+                                  descChanged ? "border-amber-500/50 focus:border-amber-500" : "border-white/10 focus:border-gold"
+                                )}
+                              />
+                           </div>
+                        </div>
+                        );
+                      })}
+
+                      {/* Save Button for servicos */}
+                      <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-4 mt-8">
+                         <div className="text-left">
+                            {isTabDirty('servicos') ? (
+                              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Você tem alterações não salvas nesta seção.
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Todas as alterações estão salvas.
+                              </p>
+                            )}
                          </div>
-                       ))}
+                         <div className="flex gap-3 w-full sm:w-auto">
+                           <button
+                             onClick={() => {
+                               setDraftServices(siteServices);
+                               toast.success("Alterações descartadas");
+                             }}
+                             disabled={!isTabDirty('servicos')}
+                             className="px-5 py-2.5 border border-white/5 text-white/40 disabled:opacity-30 text-[9px] font-bold uppercase tracking-widest rounded-sm hover:text-white hover:border-white/10 transition-all text-center"
+                           >
+                             Descartar
+                           </button>
+                           <button
+                             onClick={handleSaveServicos}
+                             disabled={!isTabDirty('servicos')}
+                             className={cn(
+                               "px-6 py-2.5 text-black text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all text-center flex items-center justify-center gap-2",
+                               isTabDirty('servicos') 
+                                 ? "bg-gold hover:bg-white shadow-[0_0_15px_rgba(255,215,0,0.25)]" 
+                                 : "bg-zinc-800 text-white/30 cursor-not-allowed border border-white/5"
+                             )}
+                           >
+                              <Save className="w-3.5 h-3.5" /> Salvar Alterações
+                           </button>
+                         </div>
+                      </div>
                     </div>
                   )}
 
                   {siteTab === 'sobre' && (
-                     <div className="space-y-6">
-                        <div>
-                           <div className="flex justify-between items-center mb-2">
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 block font-bold">Texto Sobre Nós</label>
-                             <button 
-                               onClick={() => saveSettings({ about: siteData.about })}
-                               className="text-[9px] font-bold uppercase tracking-widest text-gold hover:text-white transition-colors"
-                             >
-                               Salvar Texto
-                             </button>
-                           </div>
-                           <textarea 
-                             rows={8}
-                             value={siteData.about}
-                             onChange={e => {
-                               const newData = {...siteData, about: e.target.value};
-                               setSiteData(newData);
+                    <div className="space-y-6 max-w-2xl animate-in fade-in duration-300">
+                       <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="text-[9px] uppercase tracking-widest text-white/30 block font-bold">Texto Sobre Nós</label>
+                            {draftSiteData.about !== siteData.about && (
+                              <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                ● não salvo
+                              </span>
+                            )}
+                          </div>
+                          <textarea 
+                            rows={8}
+                            value={draftSiteData.about}
+                            onChange={e => {
+                              setDraftSiteData(prev => ({ ...prev, about: e.target.value }));
+                            }}
+                            className={cn(
+                              "w-full bg-black border p-4 rounded-sm outline-none transition-all text-sm",
+                              draftSiteData.about !== siteData.about 
+                                ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                : "border-white/10 focus:border-gold"
+                            )}
+                          />
+                       </div>
+                       <div>
+                          <div className="flex justify-between items-end mb-2">
+                            <label className="text-[9px] uppercase tracking-widest text-white/30 block font-bold">Imagem Destaque (Sobre)</label>
+                            <div className="flex items-center gap-3">
+                              {draftGallery[1] !== siteGallery[1] && (
+                                <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                  ● não salvo
+                                </span>
+                              )}
+                              {draftGallery[1] && (
+                                <button 
+                                  onClick={() => {
+                                    const newGallery = [...draftGallery];
+                                    newGallery[1] = "";
+                                    setDraftGallery(newGallery);
+                                    toast.success("Imagem removida do rascunho temporário.");
+                                  }}
+                                  className="text-[9px] text-red-500 hover:underline uppercase tracking-widest font-bold"
+                                >
+                                  Remover
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <ImageUploader 
+                            label=""
+                            aspectRatio={4 / 5}
+                            initialImage={draftGallery[1]}
+                            onImageCropped={(dataUrl) => {
+                               const newGallery = [...draftGallery];
+                               newGallery[1] = dataUrl;
+                               setDraftGallery(newGallery);
+                            }}
+                          />
+                       </div>
+
+                      {/* Save Button for Sobre Tab */}
+                      <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-4 mt-8">
+                         <div className="text-left">
+                            {isTabDirty('sobre') ? (
+                              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Você tem alterações não salvas nesta seção.
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Todas as alterações estão salvas.
+                              </p>
+                            )}
+                         </div>
+                         <div className="flex gap-3 w-full sm:w-auto">
+                           <button
+                             onClick={() => {
+                               setDraftSiteData(prev => ({ ...prev, about: siteData.about }));
+                               const newGallery = [...draftGallery];
+                               newGallery[1] = siteGallery[1];
+                               setDraftGallery(newGallery);
+                               toast.success("Alterações descartadas");
                              }}
-                             className="w-full bg-black border border-white/10 p-4 rounded-sm focus:border-gold outline-none"
-                           />
-                        </div>
-                        <div>
-                           <div className="flex justify-between items-end mb-2">
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 block font-bold">Imagem Destaque (Sobre)</label>
-                             {siteGallery[1] && (
-                               <button 
-                                 onClick={() => {
-                                   const newGallery = [...siteGallery];
-                                   newGallery[1] = "";
-                                   setSiteGallery(newGallery);
-                                   saveSettings({ galleryImages: newGallery });
-                                   toast.success("Imagem removida");
-                                 }}
-                                 className="text-[9px] text-red-500 hover:underline uppercase tracking-widest font-bold"
-                               >
-                                 Remover
-                               </button>
+                             disabled={!isTabDirty('sobre')}
+                             className="px-5 py-2.5 border border-white/5 text-white/40 disabled:opacity-30 text-[9px] font-bold uppercase tracking-widest rounded-sm hover:text-white hover:border-white/10 transition-all text-center"
+                           >
+                             Descartar
+                           </button>
+                           <button
+                             onClick={handleSaveSobre}
+                             disabled={!isTabDirty('sobre')}
+                             className={cn(
+                               "px-6 py-2.5 text-black text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all text-center flex items-center justify-center gap-2",
+                               isTabDirty('sobre') 
+                                 ? "bg-gold hover:bg-white shadow-[0_0_15px_rgba(255,215,0,0.25)]" 
+                                 : "bg-zinc-800 text-white/30 cursor-not-allowed border border-white/5"
                              )}
-                           </div>
-                           <ImageUploader 
-                             label=""
-                             aspectRatio={4 / 5}
-                             initialImage={siteGallery[1]}
-                             onImageCropped={(dataUrl) => {
-                                const newGallery = [...siteGallery];
-                                newGallery[1] = dataUrl;
-                                setSiteGallery(newGallery);
-                                saveSettings({ galleryImages: newGallery });
-                             }}
-                           />
-                        </div>
-                     </div>
+                           >
+                              <Save className="w-3.5 h-3.5" /> Salvar Alterações
+                           </button>
+                         </div>
+                      </div>
+                    </div>
                   )}
 
                   {siteTab === 'galeria' && (
-                    <div className="space-y-12">
-                      <div className="bg-zinc-900/50 border border-white/5 p-8 rounded-sm">
+                    <div className="space-y-12 animate-in fade-in duration-300">
+                      <div className="bg-zinc-900/50 border border-white/5 p-8 rounded-sm max-w-2xl">
                         <ImageUploader 
                           label="Adicionar Nova Foto para Galeria"
                           aspectRatio={3 / 4}
                           onImageCropped={(dataUrl) => {
-                             const newGallery = [...siteGallery, dataUrl];
-                             setSiteGallery(newGallery);
-                             saveSettings({ galleryImages: newGallery });
-                             toast.success("Foto adicionada à galeria");
+                             const newGallery = [...draftGallery, dataUrl];
+                             setDraftGallery(newGallery);
+                             toast.success("Foto adicionada ao rascunho temporário. Clique em Salvar para confirmar no site.");
                           }}
                         />
                         <p className="text-[9px] text-white/20 mt-4 uppercase tracking-[0.2em]">Dica: Use fotos verticais (3:4) para melhor resultado no carrossel</p>
@@ -2223,33 +2783,49 @@ function DashboardView({
 
                       <div className="space-y-4">
                         <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                          <h3 className="text-xs font-bold uppercase tracking-widest text-gold flex items-center gap-2">
-                             <ImageIcon className="w-4 h-4" /> Fotos Atuais ({siteGallery.length - 2})
+                          <h3 className="text-xs font-bold uppercase tracking-widest text-gold flex items-center gap-2 block text-left">
+                             <ImageIcon className="w-4 h-4" /> Fotos Atuais ({draftGallery.length - 2})
+                             {JSON.stringify(draftGallery.slice(2)) !== JSON.stringify(siteGallery.slice(2)) && (
+                                <span className="text-amber-500 text-[10px] font-normal lowercase tracking-wide flex items-center gap-1 ml-4 bg-amber-500/10 px-2 py-0.5 rounded-sm">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> rascunho com modificações
+                                </span>
+                             )}
                           </h3>
                         </div>
                         
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                           {siteGallery.slice(2).length === 0 ? (
+                           {draftGallery.slice(2).length === 0 ? (
                              <div className="col-span-full py-20 text-center border border-dashed border-white/5 rounded-sm">
                                <p className="text-[10px] uppercase tracking-widest text-white/20 font-bold">Nenhuma foto na galeria além das principais</p>
                              </div>
                            ) : (
-                             siteGallery.slice(2).map((img: string, i: number) => (
+                             draftGallery.slice(2).map((img: string, i: number) => {
+                               const isNew = !siteGallery.slice(2).includes(img);
+                               return (
                                <motion.div 
                                  key={i}
                                  layout
                                  initial={{ opacity: 0, scale: 0.9 }}
                                  animate={{ opacity: 1, scale: 1 }}
-                                 className="group relative aspect-[3/4] bg-black border border-white/10 rounded-sm overflow-hidden"
+                                 className={cn(
+                                   "group relative aspect-[3/4] bg-black border rounded-sm overflow-hidden",
+                                   isNew ? "border-amber-500/80" : "border-white/10"
+                                 )}
                                >
-                                  <img src={img} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                  <img src={img} referrerPolicy="no-referrer" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                  
+                                  {isNew && (
+                                     <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-amber-500 text-black text-[8px] font-bold uppercase tracking-wider rounded-sm z-20 shadow-md">
+                                        Novo
+                                     </div>
+                                  )}
+
                                   <div className="absolute inset-0 bg-black/40 group-hover:bg-black/60 transition-all flex items-center justify-center p-4">
                                      <button 
                                        onClick={() => {
-                                          const newGallery = siteGallery.filter((_, idx) => idx !== i+2);
-                                          setSiteGallery(newGallery);
-                                          saveSettings({ galleryImages: newGallery });
-                                          toast.success("Foto removida");
+                                          const newGallery = draftGallery.filter((_, idx) => idx !== i+2);
+                                          setDraftGallery(newGallery);
+                                          toast.success("Foto removida do rascunho temporário.");
                                        }}
                                        className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center hover:scale-110 transition-all shadow-xl md:opacity-0 group-hover:opacity-100"
                                        title="Remover Foto"
@@ -2258,30 +2834,121 @@ function DashboardView({
                                      </button>
                                   </div>
                                </motion.div>
-                             ))
+                               );
+                             })
                            )}
                         </div>
+                      </div>
+
+                      {/* Save Button for Galeria Tab */}
+                      <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-4 mt-8">
+                         <div className="text-left">
+                            {isTabDirty('galeria') ? (
+                              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Você tem alterações não salvas nesta seção.
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Todas as alterações estão salvas.
+                              </p>
+                            )}
+                         </div>
+                         <div className="flex gap-3 w-full sm:w-auto">
+                           <button
+                             onClick={() => {
+                               setDraftGallery(siteGallery);
+                               toast.success("Alterações descartadas");
+                             }}
+                             disabled={!isTabDirty('galeria')}
+                             className="px-5 py-2.5 border border-white/5 text-white/40 disabled:opacity-30 text-[9px] font-bold uppercase tracking-widest rounded-sm hover:text-white hover:border-white/10 transition-all text-center"
+                           >
+                             Descartar
+                           </button>
+                           <button
+                             onClick={handleSaveGaleria}
+                             disabled={!isTabDirty('galeria')}
+                             className={cn(
+                               "px-6 py-2.5 text-black text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all text-center flex items-center justify-center gap-2",
+                               isTabDirty('galeria') 
+                                 ? "bg-gold hover:bg-white shadow-[0_0_15px_rgba(255,215,0,0.25)]" 
+                                 : "bg-zinc-800 text-white/30 cursor-not-allowed border border-white/5"
+                             )}
+                           >
+                              <Save className="w-3.5 h-3.5" /> Salvar Alterações
+                           </button>
+                         </div>
                       </div>
                     </div>
                   )}
 
                   {siteTab === 'contato' && (
-                    <div className="grid md:grid-cols-2 gap-8">
-                       <div className="space-y-4">
-                          <h3 className="text-xs font-bold uppercase tracking-widest text-gold">Redes Sociais</h3>
-                          <div>
-                             <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 block font-bold">Instagram (Sem @)</label>
-                             <input 
-                               value={siteData.instagram}
-                               onChange={e => {
-                                  const newData = {...siteData, instagram: e.target.value};
-                                  setSiteData(newData);
-                                  saveSettings(newData);
-                               }}
-                               className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none"
-                             />
+                    <div className="space-y-6 max-w-2xl animate-in fade-in duration-300">
+                       <div className="grid md:grid-cols-2 gap-8">
+                          <div className="space-y-4">
+                             <h3 className="text-xs font-bold uppercase tracking-widest text-gold text-left">Redes Sociais</h3>
+                             <div>
+                                <label className="text-[9px] uppercase tracking-widest text-white/30 mb-1 flex justify-between items-center font-bold">
+                                   <span>Instagram (Sem @)</span>
+                                   {draftSiteData.instagram !== siteData.instagram && (
+                                     <span className="text-amber-500 text-[8px] uppercase tracking-wider font-bold">
+                                       ● não salvo
+                                     </span>
+                                   )}
+                                </label>
+                                <input 
+                                  value={draftSiteData.instagram}
+                                  onChange={e => {
+                                     setDraftSiteData(prev => ({ ...prev, instagram: e.target.value }));
+                                  }}
+                                  className={cn(
+                                    "w-full bg-black border p-3 rounded-sm outline-none transition-all text-sm",
+                                    draftSiteData.instagram !== siteData.instagram 
+                                      ? "border-amber-500/50 focus:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.1)]" 
+                                      : "border-white/10 focus:border-gold"
+                                  )}
+                                />
+                             </div>
                           </div>
                        </div>
+
+                      {/* Save Button for Contato Tab */}
+                      <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-4 mt-8">
+                         <div className="text-left">
+                            {isTabDirty('contato') ? (
+                              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Você tem alterações não salvas nesta seção.
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Todas as alterações estão salvas.
+                              </p>
+                            )}
+                         </div>
+                         <div className="flex gap-3 w-full sm:w-auto">
+                           <button
+                             onClick={() => {
+                               setDraftSiteData(prev => ({ ...prev, instagram: siteData.instagram }));
+                               toast.success("Alterações descartadas");
+                             }}
+                             disabled={!isTabDirty('contato')}
+                             className="px-5 py-2.5 border border-white/5 text-white/40 disabled:opacity-30 text-[9px] font-bold uppercase tracking-widest rounded-sm hover:text-white hover:border-white/10 transition-all text-center"
+                           >
+                             Descartar
+                           </button>
+                           <button
+                             onClick={handleSaveContato}
+                             disabled={!isTabDirty('contato')}
+                             className={cn(
+                               "px-6 py-2.5 text-black text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all text-center flex items-center justify-center gap-2",
+                               isTabDirty('contato') 
+                                 ? "bg-gold hover:bg-white shadow-[0_0_15px_rgba(255,215,0,0.25)]" 
+                                 : "bg-zinc-800 text-white/30 cursor-not-allowed border border-white/5"
+                             )}
+                           >
+                              <Save className="w-3.5 h-3.5" /> Salvar Alterações
+                           </button>
+                         </div>
+                      </div>
                     </div>
                   )}
                </div>
@@ -2290,72 +2957,36 @@ function DashboardView({
 
           {adminTab === 'barbers' && isAdmin && (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-               {/* Invitation Form - Only for Super Admins */}
+               {/* Sync Staff Form - Only for Super Admins */}
                {AUTHORIZED_EMAILS.includes(user?.email || '') && (
-                 <div className="bg-zinc-900 border border-white/5 p-6 rounded-sm flex flex-col md:flex-row gap-4 items-end">
-                    <div className="flex-1 w-full text-left">
-                       <label className="text-[9px] uppercase tracking-widest text-white/30 mb-2 block font-bold">Autorizar Novo E-mail</label>
-                       <input 
-                         className="w-full bg-black border border-white/10 p-3 rounded-sm focus:border-gold outline-none text-white text-xs"
-                         placeholder="email@exemplo.com"
-                         id="invite-email"
-                       />
+                 <div className="bg-zinc-900 border border-white/5 p-6 rounded-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="text-left">
+                       <h3 className="text-xs font-bold uppercase tracking-widest text-gold">Sincronizar Funcionários</h3>
+                       <p className="text-xs text-white/40 mt-1">Sincroniza a lista interna de colaboradores cadastrados com a lista pública visível para os clientes.</p>
                     </div>
-                    <div className="flex gap-2 w-full md:w-auto">
-                      <button 
-                        onClick={async () => {
-                           const el = document.getElementById('invite-email') as HTMLInputElement;
-                           const email = el?.value;
-                           if (!email || !email.includes('@')) {
-                              toast.error('Informe um e-mail válido');
-                              return;
-                           }
-                           
-                           const q = query(collection(db, 'admins'), where('email', '==', email));
-                           const exists = await getDocs(q);
-                           
-                           if (!exists.empty) {
-                              toast.error('Este e-mail já está autorizado ou registrado.');
-                              return;
-                           }
-
-                           await addDoc(collection(db, 'admins'), {
-                              email: email.toLowerCase().trim(),
-                              role: 'barber',
-                              name: 'Pendente',
-                              createdAt: serverTimestamp()
-                           });
-                           toast.success('E-mail autorizado!');
-                           el.value = '';
-                        }}
-                        className="flex-1 md:flex-none px-6 py-3 bg-gold text-black text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all shadow-[0_0_20px_rgba(255,215,0,0.2)]"
-                      >
-                         Autorizar
-                      </button>
-                      <button 
-                        onClick={async () => {
-                          const loading = toast.loading('Sincronizando...');
-                          try {
-                            const staffSnapshot = await getDocs(collection(db, 'admins'));
-                            const syncPromises = staffSnapshot.docs
-                              .filter(d => d.data().name !== 'Pendente')
-                              .map(d => setDoc(doc(db, 'public_barbers', d.id), {
-                                name: d.data().name,
-                                photo: d.data().photo || '',
-                                id: d.id
-                              }, { merge: true }));
-                            await Promise.all(syncPromises);
-                            toast.success('Lista pública sincronizada!', { id: loading });
-                          } catch (e) {
-                            toast.error('Erro na sincronização', { id: loading });
-                          }
-                        }}
-                        className="px-6 py-3 bg-white/5 text-white/40 border border-white/10 text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all rounded-sm"
-                        title="Sincronizar com lista de clientes"
-                      >
-                        Sincronizar
-                      </button>
-                    </div>
+                    <button 
+                      onClick={async () => {
+                        const loading = toast.loading('Sincronizando...');
+                        try {
+                          const staffSnapshot = await getDocs(collection(db, 'admins'));
+                          const syncPromises = staffSnapshot.docs
+                            .filter(d => d.data().name !== 'Pendente')
+                            .map(d => setDoc(doc(db, 'public_barbers', d.id), {
+                              name: d.data().name,
+                              photo: d.data().photo || '',
+                              id: d.id
+                            }, { merge: true }));
+                          await Promise.all(syncPromises);
+                          toast.success('Lista pública sincronizada!', { id: loading });
+                        } catch (e) {
+                          toast.error('Erro na sincronização', { id: loading });
+                        }
+                      }}
+                      className="w-full md:w-auto px-6 py-3 bg-gold text-black text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all shadow-[0_0_20px_rgba(255,215,0,0.2)]"
+                      title="Sincronizar com lista de clientes"
+                    >
+                      Sincronizar Lista
+                    </button>
                  </div>
                )}
 
