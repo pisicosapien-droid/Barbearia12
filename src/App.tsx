@@ -419,8 +419,51 @@ export default function App() {
         );
       }
 
+      let isInitial = true;
       unsubApps = onSnapshot(appQuery, (snapshot) => {
         setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
+        
+        if (!isInitial) {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const newApp = change.doc.data() as Appointment;
+              // Play a sound
+              try {
+                const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-600.wav");
+                audio.volume = 0.5;
+                audio.play().catch(() => {
+                  // Fallback to synthesized beep if external audio file is blocked or fails
+                  const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                  const osc = ctx.createOscillator();
+                  const gain = ctx.createGain();
+                  osc.connect(gain);
+                  gain.connect(ctx.destination);
+                  osc.type = 'sine';
+                  osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+                  osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1); // E5
+                  gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+                  osc.start();
+                  osc.stop(ctx.currentTime + 0.3);
+                });
+              } catch (audioErr) {
+                console.error("Failed to play audio:", audioErr);
+              }
+
+              // Show a notification toast
+              toast.success(`💇‍♂️ Novo Cliente: ${newApp.name || 'Cliente'} agendou para o dia ${newApp.date} às ${newApp.time}!`, {
+                duration: 8000,
+                icon: '🔔',
+                style: {
+                  background: '#18181b',
+                  color: '#fff',
+                  border: '1px solid rgba(255, 215, 0, 0.2)'
+                }
+              });
+            }
+          });
+        }
+        isInitial = false;
       }, (err) => {
         console.error("Firestore monitor (appointments):", err);
       });

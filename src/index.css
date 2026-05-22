@@ -7,9 +7,38 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    /* Prevent horizontal overshoot scroll bouncing issues in Safari/Mac */
+    overflow-x: hidden;
   }
   body {
     @apply bg-black text-white font-sans selection:bg-gold selection:text-black;
+    overflow-x: hidden;
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none !important;
+  }
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .no-scrollbar {
+    -ms-overflow-style: none !important;  /* IE and Edge */
+    scrollbar-width: none !important;  /* Firefox */
+  }
+
+  /* Explicit cross-browser backdrop filter support (Safari/iOS) */
+  .backdrop-blur-sm {
+    -webkit-backdrop-filter: blur(4px) !important;
+    backdrop-filter: blur(4px) !important;
+  }
+  .backdrop-blur-md {
+    -webkit-backdrop-filter: blur(12px) !important;
+    backdrop-filter: blur(12px) !important;
+  }
+  .backdrop-blur-lg {
+    -webkit-backdrop-filter: blur(16px) !important;
+    backdrop-filter: blur(16px) !important;
   }
 }
 
