@@ -103,6 +103,7 @@ export default function App() {
   const [busySlots, setBusySlots] = useState<string[]>([]);
   const [deletingBarberId, setDeletingBarberId] = useState<string | null>(null);
   const [currentTestimonial, setCurrentTestimonial] = useState(0);
+  const [currentGalleryIndex, setCurrentGalleryIndex] = useState(0);
   const [dbTestimonials, setDbTestimonials] = useState<any[]>([]);
   const [isTestimonialModalOpen, setIsTestimonialModalOpen] = useState(false);
   const [testimonialForm, setTestimonialForm] = useState({ name: '', text: '' });
@@ -181,13 +182,30 @@ export default function App() {
     }, 6000); // 6 seconds for a comfortable read
     return () => clearInterval(interval);
   }, [isDashboardView, combinedTestimonials.length]);
-  
+
   // Site Data State
   const [siteData, setSiteData] = useState(BARBERSHOP_DATA);
   const [siteServices, setSiteServices] = useState(SERVICES);
   const [siteGallery, setSiteGallery] = useState(GALLERY_IMAGES);
   const [dashboardDate, setDashboardDate] = useState<Date>(getBrasiliaToday());
   const [scrolled, setScrolled] = useState(false);
+
+  // Public Gallery view (excluding index 0 Hero image and index 1 About image)
+  const publicGallery = useMemo(() => {
+    return siteGallery.slice(2).filter(img => !!img);
+  }, [siteGallery]);
+
+  // Auto-slide Gallery
+  useEffect(() => {
+    if (isDashboardView) return;
+    const interval = setInterval(() => {
+      setCurrentGalleryIndex(prev => {
+        const len = publicGallery.length;
+        return len > 0 ? (prev + 1) % len : 0;
+      });
+    }, 5000); // 5 seconds for visual focus
+    return () => clearInterval(interval);
+  }, [isDashboardView, publicGallery.length]);
 
   useEffect(() => {
      const handleScroll = () => {
@@ -1250,40 +1268,121 @@ export default function App() {
 
       {/* Gallery Section */}
       <section id="galeria" className="bg-black py-20 overflow-hidden">
-        <motion.div 
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.8 }}
-          className="max-w-5xl mx-auto px-6 mb-12"
-        >
-          <h2 className="heading-secondary">Galeria</h2>
-        </motion.div>
-        
-        <motion.div 
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 1, delay: 0.2 }}
-          ref={scrollRef}
-          className="galeria-scroll px-6 md:px-[calc((100vw-1024px)/2)]"
-        >
-          {siteGallery.filter(img => img).map((img, i) => (
-            <img key={i} src={img} className="galeria-item" alt={`Trabalho ${i + 1}`} />
-          ))}
-        </motion.div>
-        
-        <motion.div 
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ delay: 0.8 }}
-          className="mt-8 text-center text-white/20 text-xs italic tracking-widest flex items-center justify-center gap-2"
-        >
-          <ChevronRight className="w-3 h-3 rotate-180" />
-          Arraste para o lado
-          <ChevronRight className="w-3 h-3" />
-        </motion.div>
+        <div className="max-w-5xl mx-auto px-6 flex flex-col md:flex-row justify-between md:items-end mb-12 gap-4">
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8 }}
+            className="text-left"
+          >
+            <h2 className="heading-secondary">Galeria</h2>
+            <p className="text-xs uppercase tracking-widest text-white/40 mt-3 block select-none">Exclusiva seleção de cortes, barbas e tratamentos.</p>
+          </motion.div>
+          
+          {/* Controls */}
+          {publicGallery.length > 1 && (
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              className="flex items-center gap-3 self-start md:self-auto"
+            >
+              <button
+                onClick={() => setCurrentGalleryIndex(prev => (prev - 1 + publicGallery.length) % publicGallery.length)}
+                className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-gold hover:text-black hover:border-gold/35 transition-all group active:scale-95 cursor-pointer"
+                title="Foto Anterior"
+              >
+                <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5 transition-transform" />
+              </button>
+              <button
+                onClick={() => setCurrentGalleryIndex(prev => (prev + 1) % publicGallery.length)}
+                className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-gold hover:text-black hover:border-gold/35 transition-all group active:scale-95 cursor-pointer"
+                title="Próxima Foto"
+              >
+                <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </motion.div>
+          )}
+        </div>
+
+        {publicGallery.length === 0 ? (
+          <div className="max-w-5xl mx-auto px-6 py-20 text-center border border-dashed border-white/5 rounded-sm">
+            <ImageIcon className="w-8 h-8 text-gold/20 mx-auto mb-2 animate-pulse" />
+            <p className="text-[10px] uppercase tracking-widest text-gold font-bold">Nenhuma foto na galeria além das principais</p>
+          </div>
+        ) : (
+          <div className="max-w-5xl mx-auto px-6 space-y-8">
+            {/* Interactive Spotlight Slider */}
+            <div className="relative aspect-[16/9] md:aspect-[21/9] w-full rounded-sm overflow-hidden border border-white/5 bg-zinc-950 shadow-[0_0_40px_rgba(0,0,0,0.8)]">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={currentGalleryIndex}
+                  initial={{ opacity: 0, scale: 1.05 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.8, ease: "easeInOut" }}
+                  className="absolute inset-0 w-full h-full"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 z-10" />
+                  <img 
+                    src={publicGallery[currentGalleryIndex]} 
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover select-none" 
+                    alt={`Trabalho ${currentGalleryIndex + 1}`}
+                  />
+                  {/* Image info counter tag */}
+                  <div className="absolute bottom-6 left-6 z-20 pointer-events-none select-none">
+                    <p className="text-[8px] md:text-[9px] uppercase tracking-[0.2em] text-gold font-bold bg-black/80 backdrop-blur-md px-3 py-1.5 border border-gold/20 rounded-sm inline-block">
+                      Trabalho {currentGalleryIndex + 1} de {publicGallery.length}
+                    </p>
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+
+              {/* Bullet points indicators inside the frame */}
+              <div className="absolute bottom-6 right-6 z-20 flex gap-1.5 bg-black/50 backdrop-blur-md p-2 rounded-sm border border-white/10">
+                {publicGallery.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentGalleryIndex(idx)}
+                    className={cn(
+                      "h-1.5 transition-all duration-500 rounded-full cursor-pointer",
+                      currentGalleryIndex === idx ? "w-6 bg-gold" : "w-1.5 bg-white/20 hover:bg-white/40"
+                    )}
+                    title={`Ver foto ${idx + 1}`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Thumbnail Row navigator */}
+            <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar scroll-smooth">
+              {publicGallery.map((img, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentGalleryIndex(idx)}
+                  className={cn(
+                    "flex-shrink-0 w-20 h-20 md:w-24 md:h-24 rounded-sm overflow-hidden border transition-all duration-300 relative group cursor-pointer",
+                    currentGalleryIndex === idx 
+                      ? "border-gold scale-95 shadow-[0_0_15px_rgba(212,175,55,0.35)]" 
+                      : "border-white/5 opacity-40 hover:opacity-100 hover:border-white/20"
+                  )}
+                >
+                  <img 
+                    src={img} 
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                    alt={`Miniatura Trabalho ${idx + 1}`} 
+                  />
+                  {currentGalleryIndex === idx && (
+                    <div className="absolute inset-0 bg-gold/10 pointer-events-none border border-gold/25" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Booking Form Section */}
@@ -1667,11 +1766,32 @@ export default function App() {
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.8 }}
-              className="h-full min-h-[250px] border border-white/10 p-1 overflow-hidden rounded-sm transition-all duration-700"
+              className="relative h-full min-h-[300px] border border-white/10 p-1 overflow-hidden rounded-sm transition-all duration-700 group cursor-pointer"
             >
+               <a 
+                 href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent("Barbearia D'Biazzi, Rua Bom Jesus de Pirapora, 2523 - Vila Rami, Jundiaí - SP")}`}
+                 target="_blank"
+                 rel="noopener noreferrer"
+                 className="absolute inset-0 z-10 select-none block"
+                 title="Clique para abrir no Google Maps"
+               >
+                 {/* Visual indicator / banner overlay on hover */}
+                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/60 transition-all duration-300 flex items-center justify-center">
+                   <div className="bg-black/90 border border-gold/30 text-gold px-5 py-3 rounded-sm text-[10px] uppercase font-bold tracking-widest opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-300 flex items-center gap-2 shadow-[0_0_20px_rgba(212,175,55,0.2)]">
+                     <MapPin className="w-4 h-4 text-gold animate-bounce" />
+                     <span>Abrir no Google Maps</span>
+                   </div>
+                 </div>
+                 
+                 {/* Persistent subtle corner badge */}
+                 <div className="absolute bottom-3 right-3 z-10 bg-black/80 backdrop-blur-md border border-white/10 text-white/70 px-3 py-1.5 rounded-sm text-[8px] uppercase tracking-wider font-bold group-hover:border-gold/30 group-hover:text-gold transition-colors flex items-center gap-1.5">
+                   <span className="w-1.5 h-1.5 bg-gold rounded-full animate-pulse" />
+                   Clique para Navegar
+                 </div>
+               </a>
                <iframe
-                  src={siteData.mapsEmbed}
-                  className="w-full h-full min-h-[250px]"
+                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3663.8569429446387!2d-46.88414452504825!3d-23.211831348810243!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x94cf269784196147%3A0xe5a14f494a86b1f!2sBarbearia%20D'Biazzi!5e0!3m2!1spt-BR!2sbr!4v1716060000000!5m2!1spt-BR!2sbr"
+                  className="w-full h-full min-h-[300px] pointer-events-none"
                   style={{ border: 0 }}
                   allowFullScreen
                   loading="lazy"
@@ -3501,13 +3621,7 @@ function DashboardView({
                  const monthlyApps = appointments.filter((a: any) => a.date.startsWith(currentMonthStr));
                  const confirmedMonthly = monthlyApps.filter((a: any) => a.status === 'confirmed');
                  
-                 const getPriceValue = (app: any) => {
-                   let rawPrice = app.servicePrice;
-                   if (!rawPrice) {
-                      const servName = app.serviceType || app.serviceName;
-                      const s = siteServices.find((sv: any) => sv.name === servName);
-                      rawPrice = s?.price;
-                   }
+                 const getCleanPriceValue = (rawPrice: any) => {
                    if (!rawPrice) return 0;
                    try {
                      const cleanPrice = String(rawPrice).replace(/[^\d,.]/g, '').replace(',', '.');
@@ -3516,15 +3630,144 @@ function DashboardView({
                    } catch (e) { return 0; }
                  };
 
-                 const monthlyTotalRevenue = confirmedMonthly.reduce((acc: number, curr: any) => acc + getPriceValue(curr), 0);
+                 const getPriceValue = (app: any) => {
+                   let rawPrice = app.servicePrice;
+                   if (!rawPrice) {
+                      const servName = app.serviceType || app.serviceName;
+                      const s = siteServices.find((sv: any) => sv.name === servName);
+                      rawPrice = s?.price;
+                   }
+                   return getCleanPriceValue(rawPrice);
+                 };
+
+                 // Define standard service categories for quantity and unit price consideration
+                 const categories = [
+                   { 
+                     key: 'corte', 
+                     label: 'Corte de Cabelo', 
+                     matchKeywords: ['corte', 'cabelo'], 
+                     excludeKeywords: ['combo'],
+                     qty: 0, 
+                     unitPrice: 40 
+                   },
+                   { 
+                     key: 'barba', 
+                     label: 'Designer de Barba', 
+                     matchKeywords: ['barba', 'designer', 'design'], 
+                     excludeKeywords: ['combo', 'barboterapia'],
+                     qty: 0, 
+                     unitPrice: 35 
+                   },
+                   { 
+                     key: 'combo', 
+                     label: 'Combo Cabelo & Barba', 
+                     matchKeywords: ['combo'], 
+                     excludeKeywords: [],
+                     qty: 0, 
+                     unitPrice: 60 
+                   },
+                   { 
+                     key: 'barboterapia', 
+                     label: 'Barboterapia', 
+                     matchKeywords: ['barboterapia'], 
+                     excludeKeywords: [],
+                     qty: 0, 
+                     unitPrice: 45 
+                   },
+                   { 
+                     key: 'sobrancelha', 
+                     label: 'Sobrancelha (navalha)', 
+                     matchKeywords: ['sobrancelha', 'sobrancelhas'], 
+                     excludeKeywords: [],
+                     qty: 0, 
+                     unitPrice: 10 
+                   },
+                   { 
+                     key: 'alisamento', 
+                     label: 'Alisamento', 
+                     matchKeywords: ['alisamento', 'alisar'], 
+                     excludeKeywords: [],
+                     qty: 0, 
+                     unitPrice: 30 
+                   }
+                 ];
+
+                 // Synchronize unit prices dynamically with siteServices configurations
+                 categories.forEach(cat => {
+                   const matchedService = siteServices.find(ss => {
+                     const nameLower = ss.name.toLowerCase();
+                     const match = cat.matchKeywords.every(kw => nameLower.includes(kw));
+                     const exclude = cat.excludeKeywords.some(kw => nameLower.includes(kw));
+                     return match && !exclude;
+                   });
+                   if (matchedService) {
+                     cat.unitPrice = getCleanPriceValue(matchedService.price);
+                     cat.label = matchedService.name;
+                   }
+                 });
+
+                 let othersQty = 0;
+                 let othersTotal = 0;
+
+                 confirmedMonthly.forEach(app => {
+                   let matched = false;
+                   const servName = (app.serviceType || app.serviceName || '').toLowerCase();
+                   
+                   for (const cat of categories) {
+                     const match = cat.matchKeywords.every(kw => servName.includes(kw));
+                     const exclude = cat.excludeKeywords.some(kw => servName.includes(kw));
+                     if (match && !exclude) {
+                       cat.qty += 1;
+                       matched = true;
+                       break;
+                     }
+                   }
+                   if (!matched) {
+                     othersQty += 1;
+                     othersTotal += getPriceValue(app);
+                   }
+                 });
+
+                 // Formula to calculate metrics where revenue considers quantity * unit price
+                 const monthlyTotalRevenue = categories.reduce((sum, cat) => sum + (cat.qty * cat.unitPrice), 0) + othersTotal;
 
                  return (
                    <>
+                    {/* Relatório Header com Ações Rápidas */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-950 p-6 border border-white/5 rounded-sm mb-6 animate-in fade-in duration-300">
+                      <div>
+                        <h3 className="text-xs font-bold uppercase tracking-widest text-gold flex items-center gap-2 m-0 select-none">
+                          <BarChart3 className="w-4 h-4 text-gold" /> Relatório de Métricas & Desempenho
+                        </h3>
+                        <p className="text-[10px] text-white/40 uppercase tracking-wider mt-1">Visão geral consolidada do faturamento e atendimentos • {format(new Date(), 'MMMM', { locale: ptBR })}</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        {confirmedMonthly.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleClearMonthlyReceipts(confirmedMonthly, format(new Date(), 'yyyy-MM'))}
+                            className="px-3 py-2 border border-red-500/20 hover:border-red-500 hover:text-red-500 hover:bg-red-500/5 text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all duration-200 flex items-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.05)] active:scale-95 animate-pulse"
+                            title="Apagar permanentemente todos os recibos confirmados deste mês do banco de dados para redefinir as métricas"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Zerar Métricas do Mês
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => exportAppointmentsPDF(confirmedMonthly, `recibos_mensais_${format(new Date(), 'yyyy-MM')}.pdf`)}
+                          className="px-3 py-2 border border-white/5 hover:border-gold/30 text-white/60 hover:text-gold hover:bg-gold/5 text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all duration-200 flex items-center gap-2 cursor-pointer active:scale-95"
+                          title="Exportar PDF Completo"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Salvar Relatório PDF
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         {[
                           { label: 'Cortes no Mês', value: monthlyApps.length, icon: Scissors },
                           { label: 'Confirmados', value: confirmedMonthly.length, icon: CheckCircle2, color: 'text-green-500' },
-                          { label: userRole === 'barber' ? 'Meu Faturamento' : 'Receita Est. (Mês)', value: `R$ ${monthlyTotalRevenue.toLocaleString('pt-BR')}`, icon: TrendingUp, color: 'text-gold' },
+                          { label: userRole === 'barber' ? 'Meu Faturamento' : 'Receita Est. (Mês)', value: `R$ ${monthlyTotalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: TrendingUp, color: 'text-gold' },
                           { label: userRole === 'barber' ? 'Individual' : 'Total Geral', value: appointments.length, icon: BarChart3 }
                         ].map((stat, i) => (
                           <div key={i} className="bg-zinc-900 p-6 border border-white/5 rounded-sm flex items-center justify-between">
@@ -3535,6 +3778,62 @@ function DashboardView({
                              {stat.icon && <stat.icon className="w-6 h-6 text-white/5" />}
                           </div>
                         ))}
+                    </div>
+
+                    {/* Highly polished demonstrative table for quantity and unit price consideration */}
+                    <div className="bg-zinc-900 border border-white/5 p-6 rounded-sm space-y-6 animate-in fade-in duration-500">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-widest text-gold flex items-center gap-2 m-0 select-none">
+                            <TrendingUp className="w-4 h-4" /> Demonstrativo de Faturamento por Serviço
+                          </h3>
+                          <p className="text-[10px] text-white/40 uppercase tracking-wider mt-1">Somas reais formadas pela quantidade de cada serviço prestado multiplicada pelo seu preço unitário</p>
+                        </div>
+                        <div className="bg-zinc-950 border border-white/5 px-4 py-2 rounded-sm text-right">
+                          <p className="text-[9px] text-white/40 uppercase tracking-widest font-bold">Total Geral (Receita)</p>
+                          <p className="text-lg font-display font-black text-gold mt-1">R$ {monthlyTotalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-white/10 text-white/40 text-[9px] uppercase tracking-widest font-bold">
+                              <th className="py-3 px-4">Serviço Prestado</th>
+                              <th className="py-3 px-4 text-center">Quantidade</th>
+                              <th className="py-3 px-4 text-right">Preço Unitário</th>
+                              <th className="py-3 px-4 text-right">Subtotal</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5 text-[11px] uppercase tracking-wide font-mono">
+                            {categories.map((cat) => {
+                              const subtotal = cat.qty * cat.unitPrice;
+                              return (
+                                <tr key={cat.key} className="hover:bg-white/5 transition-colors">
+                                  <td className="py-4 px-4 font-sans font-bold text-white text-xs flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
+                                    {cat.label}
+                                  </td>
+                                  <td className="py-4 px-4 text-center text-white/80 font-bold">{cat.qty}</td>
+                                  <td className="py-4 px-4 text-right text-white/60">R$ {cat.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                  <td className="py-4 px-4 text-right text-gold font-bold">R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                              );
+                            })}
+                            {othersQty > 0 && (
+                              <tr className="hover:bg-white/5 transition-colors">
+                                <td className="py-4 px-4 font-sans font-bold text-white text-xs flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-white/40" />
+                                  Outros Serviços
+                                </td>
+                                <td className="py-4 px-4 text-center text-white/80 font-bold">{othersQty}</td>
+                                <td className="py-4 px-4 text-right text-white/60">Variado</td>
+                                <td className="py-4 px-4 text-right text-gold font-bold">R$ {othersTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
 
                     <div className="grid md:grid-cols-3 gap-8">

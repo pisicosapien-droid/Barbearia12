@@ -42,7 +42,8 @@ export const OPENING_HOURS = [
 export const AUTHORIZED_EMAILS = [
   "pisicosapien@gmail.com",
   "psicosapiens@gmail.com",
-  "murilobiazi@outlook.com"
+  "murilobiazi@outlook.com",
+  "murilobiazi@outlook"
 ];
 
 export const GALLERY_IMAGES = [
