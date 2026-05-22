@@ -85,6 +85,19 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Testimonials Collection
+    match /testimonials/{testimonialId} {
+      allow read, list: if true;
+      allow create: if request.resource.data.name is string && 
+                      request.resource.data.name.size() > 0 &&
+                      request.resource.data.name.size() <= 100 &&
+                      request.resource.data.text is string && 
+                      request.resource.data.text.size() > 0 &&
+                      request.resource.data.text.size() <= 1000 &&
+                      request.resource.data.timestamp == request.time;
+      allow update, delete: if isAdmin();
+    }
+
     // Default deny catch-all
     match /{document=**} {
       allow read, write: if false;

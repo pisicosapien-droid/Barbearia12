@@ -96,22 +96,91 @@ export default function App() {
     localStorage.setItem('isDashboardView', val.toString());
   };
   const [adminTab, setAdminTab] = useState<'appointments' | 'site' | 'barbers' | 'reports'>('appointments');
-  const [siteTab, setSiteTab] = useState<'geral' | 'hero' | 'servicos' | 'sobre' | 'galeria' | 'contato'>('geral');
+  const [siteTab, setSiteTab] = useState<'geral' | 'hero' | 'servicos' | 'sobre' | 'galeria' | 'contato' | 'depoimentos'>('geral');
   const [selectedBarberId, setSelectedBarberId] = useState<string>('all');
   const [logoDragX, setLogoDragX] = useState(0);
   const [isBusySlotsLoading, setIsBusySlotsLoading] = useState(false);
   const [busySlots, setBusySlots] = useState<string[]>([]);
   const [deletingBarberId, setDeletingBarberId] = useState<string | null>(null);
   const [currentTestimonial, setCurrentTestimonial] = useState(0);
+  const [dbTestimonials, setDbTestimonials] = useState<any[]>([]);
+  const [isTestimonialModalOpen, setIsTestimonialModalOpen] = useState(false);
+  const [testimonialForm, setTestimonialForm] = useState({ name: '', text: '' });
+  const [isSubmittingTestimonial, setIsSubmittingTestimonial] = useState(false);
+
+  const combinedTestimonials = useMemo(() => {
+    const showDb = dbTestimonials.filter(t => t.approved !== false);
+    return [...showDb, ...TESTIMONIALS];
+  }, [dbTestimonials]);
+
+  // Fetch Testimonials from Firestore
+  useEffect(() => {
+    if (!db || db._isMock) {
+      console.warn("Firestore is mock. Skipping testimonials loading.");
+      return;
+    }
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = onSnapshot(query(collection(db, 'testimonials'), orderBy('timestamp', 'desc')), (snapshot) => {
+        const list = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            name: data.name || '',
+            text: data.text || '',
+            role: 'Cliente',
+            approved: data.approved !== false
+          };
+        });
+        setDbTestimonials(list);
+      }, (error) => {
+        console.error("Firestore monitor (testimonials):", error.message);
+      });
+    } catch (err) {
+      console.error("Setup error (testimonials):", err);
+    }
+    return () => unsub?.();
+  }, []);
+
+  const handleCreateTestimonial = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!testimonialForm.name.trim() || !testimonialForm.text.trim()) {
+      toast.error('Preencha todos os campos!');
+      return;
+    }
+
+    setIsSubmittingTestimonial(true);
+    const loadingToast = toast.loading('Enviando seu depoimento...');
+
+    try {
+      await addDoc(collection(db, 'testimonials'), {
+        name: testimonialForm.name.trim(),
+        text: testimonialForm.text.trim(),
+        timestamp: serverTimestamp()
+      });
+
+      toast.success('Depoimento enviado com sucesso!', { id: loadingToast });
+      setTestimonialForm({ name: '', text: '' });
+      setIsTestimonialModalOpen(false);
+    } catch (error: any) {
+      toast.error('Erro ao enviar depoimento. Tente novamente.', { id: loadingToast });
+      handleFirestoreError(error, OperationType.CREATE, 'testimonials');
+    } finally {
+      setIsSubmittingTestimonial(false);
+    }
+  };
 
   // Auto-slide Testimonials
   useEffect(() => {
     if (isDashboardView) return;
     const interval = setInterval(() => {
-      setCurrentTestimonial(prev => (prev + 1) % TESTIMONIALS.length);
+      setCurrentTestimonial(prev => {
+        const len = combinedTestimonials.length;
+        return len > 0 ? (prev + 1) % len : 0;
+      });
     }, 6000); // 6 seconds for a comfortable read
     return () => clearInterval(interval);
-  }, [isDashboardView, TESTIMONIALS.length]);
+  }, [isDashboardView, combinedTestimonials.length]);
   
   // Site Data State
   const [siteData, setSiteData] = useState(BARBERSHOP_DATA);
@@ -251,6 +320,61 @@ export default function App() {
     }
     return () => unsub?.();
   }, [isAdmin, userRole]);
+
+  // Keep public_barbers automatically synchronized in the background
+  useEffect(() => {
+    if (!db || db._isMock) return;
+    if (!isAdmin && userRole !== 'barber') return;
+    if (staff.length === 0) return;
+
+    const performAutoSync = async () => {
+      try {
+        const activeStaff = staff.filter(s => s.name !== 'Pendente');
+        const syncPromises: Promise<void>[] = [];
+
+        for (const s of activeStaff) {
+          // Find this staff member in public_barbers list
+          const publicB = barbers.find(b => b.id === s.id);
+          // If not found, or name/photo is different, auto-sync!
+          if (!publicB || publicB.name !== s.name || publicB.photo !== s.photo) {
+            console.log(`Auto-syncing public profile for barber ${s.name} (${s.id})`);
+            syncPromises.push(
+              setDoc(doc(db, 'public_barbers', s.id), {
+                name: s.name,
+                photo: s.photo || '',
+                id: s.id
+              }, { merge: true })
+            );
+          }
+        }
+
+        // Also clean up any public_barbers that are no longer in active staff list
+        for (const pb of barbers) {
+          const isStillStaff = staff.some(s => s.id === pb.id);
+          if (!isStillStaff) {
+            console.log(`Auto-removing deleted/inactive barber from public list: ${pb.name} (${pb.id})`);
+            syncPromises.push(
+              deleteDoc(doc(db, 'public_barbers', pb.id))
+            );
+          }
+        }
+
+        if (syncPromises.length > 0) {
+          await Promise.allSettled(syncPromises);
+          console.log(`Background barber synchronization complete: ${syncPromises.length} updates applied.`);
+        }
+      } catch (err) {
+        console.warn("Background auto-sync of public_barbers failed:", err);
+      }
+    };
+
+    // Debounce slightly to wait for both lists to load fully
+    const timer = setTimeout(() => {
+      performAutoSync();
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [staff, barbers, isAdmin, userRole]);
 
   // Fetch Appointments (Admin/Barber specific)
   useEffect(() => {
@@ -768,6 +892,84 @@ export default function App() {
                   Sim
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Testimonial Submission Modal */}
+      <AnimatePresence>
+        {isTestimonialModalOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsTestimonialModalOpen(false);
+              }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-neutral-900 border border-white/10 p-8 rounded-sm shadow-2xl"
+            >
+              <button 
+                onClick={() => setIsTestimonialModalOpen(false)}
+                className="absolute top-4 right-4 text-white/40 hover:text-white transition-colors"
+                id="close-testimonial-modal-btn"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="text-center mb-6">
+                <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4 text-gold">
+                  <MessageSquare className="w-6 h-6" />
+                </div>
+                <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight">Deixe seu depoimento</h3>
+                <p className="text-white/40 text-[9px] uppercase tracking-widest mt-1">Sua opinião é muito importante para nós</p>
+              </div>
+
+              <form onSubmit={handleCreateTestimonial} className="space-y-4">
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest text-white/40 mb-2 block font-bold">Nome</label>
+                  <input 
+                    required
+                    maxLength={100}
+                    value={testimonialForm.name}
+                    onChange={e => setTestimonialForm(prev => ({ ...prev, name: e.target.value }))}
+                    type="text" 
+                    placeholder="Seu nome"
+                    className="w-full bg-white/5 border border-white/10 p-4 rounded-sm focus:border-gold outline-none transition-all text-sm text-white" 
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest text-white/40 mb-2 block font-bold">Depoimento</label>
+                  <textarea 
+                    required
+                    maxLength={1000}
+                    rows={4}
+                    value={testimonialForm.text}
+                    onChange={e => setTestimonialForm(prev => ({ ...prev, text: e.target.value }))}
+                    placeholder="Escreva aqui sua experiência na Barbearia..."
+                    className="w-full bg-white/5 border border-white/10 p-4 rounded-sm focus:border-gold outline-none transition-all text-sm text-white resize-none" 
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <button 
+                    disabled={isSubmittingTestimonial}
+                    type="submit"
+                    className="w-full py-4 bg-gold hover:bg-white text-black font-bold uppercase tracking-widest text-[10px] rounded-sm transition-all shadow-lg shadow-gold/10 disabled:opacity-50 cursor-pointer"
+                    id="submit-testimonial-btn"
+                  >
+                    {isSubmittingTestimonial ? 'Enviando...' : 'Enviar Depoimento'}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}
@@ -1356,13 +1558,13 @@ export default function App() {
             
             <div className="flex gap-2">
               <button 
-                onClick={() => setCurrentTestimonial(prev => (prev - 1 + TESTIMONIALS.length) % TESTIMONIALS.length)}
+                onClick={() => setCurrentTestimonial(prev => (prev - 1 + combinedTestimonials.length) % combinedTestimonials.length)}
                 className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-gold hover:text-black transition-all group active:scale-95"
               >
                 <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5 transition-transform" />
               </button>
               <button 
-                onClick={() => setCurrentTestimonial(prev => (prev + 1) % TESTIMONIALS.length)}
+                onClick={() => setCurrentTestimonial(prev => (prev + 1) % combinedTestimonials.length)}
                 className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-gold hover:text-black transition-all group active:scale-95"
               >
                 <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
@@ -1372,34 +1574,36 @@ export default function App() {
 
           <div className="relative min-h-[300px] md:min-h-[200px] flex items-center">
             <AnimatePresence mode="wait">
-              <motion.div 
-                key={currentTestimonial}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
-                className="w-full"
-              >
-                <div className="bg-white/[0.02] p-8 md:p-10 border-l-2 border-gold italic relative">
-                  <MessageSquare className="absolute -top-4 -left-4 w-12 h-12 text-gold/10 -rotate-12" />
-                  <p className="text-xl md:text-2xl text-white/90 leading-relaxed mb-6 font-light">
-                    "{TESTIMONIALS[currentTestimonial].text}"
-                  </p>
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center uppercase text-sm font-black text-gold border border-white/5">
-                      {TESTIMONIALS[currentTestimonial].name[0]}
-                    </div>
-                    <div>
-                      <p className="font-bold text-base uppercase tracking-tighter text-white">{TESTIMONIALS[currentTestimonial].name}</p>
-                      <p className="text-[10px] text-gold/40 uppercase tracking-[0.2em] font-bold">{TESTIMONIALS[currentTestimonial].role}</p>
+              {combinedTestimonials[currentTestimonial] && (
+                <motion.div 
+                  key={currentTestimonial}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.5, ease: "easeOut" }}
+                  className="w-full"
+                >
+                  <div className="bg-white/[0.02] p-8 md:p-10 border-l-2 border-gold italic relative">
+                    <MessageSquare className="absolute -top-4 -left-4 w-12 h-12 text-gold/10 -rotate-12" />
+                    <p className="text-xl md:text-2xl text-white/90 leading-relaxed mb-6 font-light">
+                      "{combinedTestimonials[currentTestimonial].text}"
+                    </p>
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center uppercase text-sm font-black text-gold border border-white/5">
+                        {combinedTestimonials[currentTestimonial].name?.[0] || '?'}
+                      </div>
+                      <div>
+                        <p className="font-bold text-base uppercase tracking-tighter text-white">{combinedTestimonials[currentTestimonial].name}</p>
+                        <p className="text-[10px] text-gold/40 uppercase tracking-[0.2em] font-bold">{combinedTestimonials[currentTestimonial].role || 'Cliente'}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </motion.div>
+                </motion.div>
+              )}
             </AnimatePresence>
 
             <div className="absolute bottom-[-30px] left-0 flex gap-2">
-              {TESTIMONIALS.map((_, i) => (
+              {combinedTestimonials.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setCurrentTestimonial(i)}
@@ -1410,6 +1614,15 @@ export default function App() {
                 />
               ))}
             </div>
+          </div>
+
+          <div className="mt-12 flex justify-center">
+            <button
+              onClick={() => setIsTestimonialModalOpen(true)}
+              className="px-6 py-3 bg-gold text-black text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all shadow-[0_0_20px_rgba(255,215,0,0.2)] rounded-sm cursor-pointer"
+            >
+              Deixe o seu depoimento
+            </button>
           </div>
         </div>
       </section>
@@ -1566,6 +1779,7 @@ export default function App() {
           setDashboardDate={setDashboardDate}
           showFullHistory={showFullHistory}
           setShowFullHistory={setShowFullHistory}
+          dbTestimonials={dbTestimonials}
         />
       )}
     </div>
@@ -1601,7 +1815,8 @@ function DashboardView({
       dashboardDate,
       setDashboardDate,
       showFullHistory,
-      setShowFullHistory
+      setShowFullHistory,
+      dbTestimonials
     }: any) {
       const calendarMonth = useState(new Date())[0]; // Logic preserved for structure, but set via setter below
       const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -2303,7 +2518,7 @@ function DashboardView({
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                {/* Sub-tabs for Site editing */}
                <div className="flex gap-1 bg-zinc-900 p-1 rounded-sm border border-white/5 overflow-x-auto">
-                  {(['geral', 'hero', 'servicos', 'sobre', 'galeria', 'contato'] as const).map(tab => (
+                  {(['geral', 'hero', 'servicos', 'sobre', 'galeria', 'contato', 'depoimentos'] as const).map(tab => (
                     <button
                       key={tab}
                       onClick={() => handleSetSiteTab(tab)}
@@ -2316,7 +2531,8 @@ function DashboardView({
                        tab === 'hero' ? 'Início' :
                        tab === 'servicos' ? 'Serviços' :
                        tab === 'sobre' ? 'Sobre' :
-                       tab === 'galeria' ? 'Galeria' : 'Contato'}
+                       tab === 'galeria' ? 'Galeria' : 
+                       tab === 'depoimentos' ? 'Depoimentos' : 'Contato'}
                     </button>
                   ))}
                </div>
@@ -3028,6 +3244,91 @@ function DashboardView({
                            </button>
                          </div>
                       </div>
+                    </div>
+                  )}
+
+                  {siteTab === 'depoimentos' && (
+                    <div className="space-y-6 animate-in fade-in duration-300">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-widest text-gold text-left">Depoimentos dos Clientes</h3>
+                          <p className="text-xs text-white/40 mt-1 text-left">Gerencie a exibição e moderação dos depoimentos enviados pelos clientes.</p>
+                        </div>
+                      </div>
+
+                      {dbTestimonials.length === 0 ? (
+                        <div className="py-12 text-center border border-dashed border-white/5 rounded-sm bg-white/5 animate-pulse">
+                          <MessageSquare className="w-8 h-8 text-gold/20 mx-auto mb-2" />
+                          <p className="text-[10px] uppercase tracking-widest text-gold font-bold">Nenhum depoimento enviado</p>
+                          <p className="text-[9px] text-white/30 uppercase tracking-tight mt-1 text-center">Os depoimentos dos clientes aparecerão aqui quando forem enviados pelo site.</p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-4">
+                          {dbTestimonials.map((t: any) => (
+                            <div 
+                              key={t.id} 
+                              className="bg-neutral-900 p-4 md:p-6 rounded-sm border border-white/5 flex flex-col md:flex-row items-center justify-between gap-4 transition-all hover:border-white/10"
+                            >
+                              <div className="flex items-start gap-4 w-full md:w-auto text-left">
+                                <div className="w-10 h-10 rounded-full bg-gold/10 text-gold flex items-center justify-center font-display font-semibold flex-shrink-0 text-sm">
+                                  {t.name?.[0] || '?'}
+                                </div>
+                                <div className="min-w-0 flex-1 md:flex-none max-w-xl">
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-bold text-sm md:text-base text-white">{t.name}</h4>
+                                    <span className="text-[8px] uppercase font-bold px-1.5 py-0.5 rounded-sm tracking-widest bg-white/5 text-white/40">
+                                      {t.role || 'Cliente'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-white/70 italic mt-1 leading-relaxed">"{t.text}"</p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between md:justify-end gap-3 w-full md:w-auto mt-4 md:mt-0 pt-3 md:pt-0 border-t border-white/5 md:border-none">
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await updateDoc(doc(db, 'testimonials', t.id), {
+                                        approved: !t.approved
+                                      });
+                                      toast.success(t.approved ? "Depoimento ocultado do site!" : "Depoimento ativado no site!");
+                                    } catch (err) {
+                                      toast.error("Erro ao atualizar status");
+                                    }
+                                  }}
+                                  className={cn(
+                                    "px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest rounded-sm border transition-all cursor-pointer flex-1 md:flex-initial text-center whitespace-nowrap",
+                                    t.approved 
+                                      ? "bg-gold/10 hover:bg-gold/25 text-gold border-gold/30" 
+                                      : "bg-white/5 hover:bg-white/10 text-white/40 border-white/10"
+                                  )}
+                                >
+                                  {t.approved ? "● Exibindo no Site" : "○ Oculto no Site"}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (window.confirm("Deseja realmente excluir permanentemente este depoimento?")) {
+                                      const loading = toast.loading('Excluindo...');
+                                      try {
+                                        await deleteDoc(doc(db, 'testimonials', t.id));
+                                        toast.success('Depoimento removido!', { id: loading });
+                                      } catch (err) {
+                                        toast.error('Erro ao remover depoimento', { id: loading });
+                                      }
+                                    }
+                                  }}
+                                  className="p-1.5 md:p-2 text-red-500 hover:bg-red-500/10 rounded-sm border border-red-500/20 cursor-pointer transition-colors active:scale-95 flex items-center justify-center flex-shrink-0 animate-in fade-in"
+                                  title="Excluir Depoimento"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 

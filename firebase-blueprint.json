@@ -60,6 +60,17 @@
         }
       },
       "required": ["name", "slogan", "about", "services"]
+    },
+    "Testimonial": {
+      "title": "Testimonial",
+      "description": "Reviews and testimonials from clients",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the client" },
+        "text": { "type": "string", "description": "Text of the testimonial" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the testimonial was created" }
+      },
+      "required": ["name", "text", "timestamp"]
     }
   },
   "firestore": {
@@ -74,6 +85,10 @@
     "/settings/website": {
       "schema": "Settings",
       "description": "Global website configuration"
+    },
+    "/testimonials/{testimonialId}": {
+      "schema": "Testimonial",
+      "description": "Client-submitted testimonials displayable on the home page."
     }
   }
 }
