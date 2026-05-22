@@ -32,6 +32,9 @@ import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   ShieldCheck,
+  ChevronDown,
+  ChevronUp,
+  Download,
   Image as ImageIcon
 } from 'lucide-react';
 import { ImageUploader } from './components/ImageUploader';
@@ -44,6 +47,8 @@ import { Barber, Appointment } from './types';
 import { cn } from './lib/utils';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, addMonths, subMonths, startOfToday, isBefore, startOfDay, isSameMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const formatInBrasilia = (date: Date) => {
   try {
@@ -1600,7 +1605,98 @@ function DashboardView({
     }: any) {
       const calendarMonth = useState(new Date())[0]; // Logic preserved for structure, but set via setter below
       const [currentMonth, setCurrentMonth] = useState(new Date());
-      const [subTab, setSubTab] = useState<'active' | 'history'>('active');
+      // State for expanding/collapsing records
+      const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
+      const [expandedAppId, setExpandedAppId] = useState<string | null>(null);
+      const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
+      const [showAllMonthlyReports, setShowAllMonthlyReports] = useState(false);
+
+      // Export as PDF (Metrics report)
+      const exportAppointmentsPDF = (dataList: any[], filename: string) => {
+        try {
+          const doc = new jsPDF();
+          
+          // Header / Title in PDF
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(16);
+          doc.text("Relatorio de Atendimentos e Metricas", 14, 20);
+          
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(10);
+          doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 28);
+          
+          const totalVal = dataList.reduce((acc, app) => {
+            let rawPrice = app.servicePrice;
+            if (!rawPrice) {
+              const servName = app.serviceType || app.serviceName;
+              const s = siteServices.find((sv: any) => sv.name === servName);
+              rawPrice = s?.price || '0';
+            }
+            return acc + Number(String(rawPrice).replace(/[^\d.,]/g, '').replace(',', '.'));
+          }, 0);
+          
+          doc.text(`Total de Atendimentos: ${dataList.length}`, 14, 34);
+          doc.text(`Faturamento Total: R$ ${totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 14, 40);
+
+          const headers = [['Data', 'Horario', 'Cliente', 'Servico', 'Preco (R$)', 'Status', 'Barbeiro']];
+          const rows = dataList.map((app) => {
+            let rawPrice = app.servicePrice;
+            if (!rawPrice) {
+              const servName = app.serviceType || app.serviceName;
+              const s = siteServices.find((sv: any) => sv.name === servName);
+              rawPrice = s?.price || '0';
+            }
+            const cleanPrice = Number(String(rawPrice).replace(/[^\d.,]/g, '').replace(',', '.'));
+            
+            return [
+              app.date || '',
+              app.time || '',
+              app.clientName || app.name || '',
+              app.serviceType || app.serviceName || '',
+              `R$ ${cleanPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+              app.status === 'completed' ? 'CONCLUIDO' : app.status === 'confirmed' ? 'CONFIRMADO' : app.status === 'pending' ? 'AGENDADO' : 'CANCELADO',
+              app.barberName || ''
+            ];
+          });
+
+          autoTable(doc, {
+            startY: 46,
+            head: headers,
+            body: rows,
+            theme: 'striped',
+            headStyles: { fillColor: [184, 134, 11] }, // Dark goldenrod brand color
+            styles: { fontSize: 8 },
+          });
+
+          doc.save(filename);
+          toast.success("Relatorio PDF baixado com sucesso!");
+        } catch (error: any) {
+          console.error("Erro ao gerar PDF:", error);
+          toast.error("Ocorreu um erro ao exportar o PDF: " + error.message);
+        }
+      };
+
+      // Clear all monthly completed/confirmed receipts
+      const handleClearMonthlyReceipts = async (monthlyList: any[], monthStr: string) => {
+        const completedMonthly = monthlyList.filter((a: any) => a.status === 'completed' || a.status === 'confirmed');
+        if (completedMonthly.length === 0) {
+          toast.error("Sem recebimentos confirmados/concluídos para apagar neste mês.");
+          return;
+        }
+        const confirmDelete = window.confirm(`Deseja apagar permanentemente do banco de dados todos os ${completedMonthly.length} recibos/agendamentos confirmados do mês (${monthStr})? IMPORTANTE: Isso redefinirá permanentemente suas métricas e faturamento.`);
+        if (!confirmDelete) return;
+        
+        const loadingToast = toast.loading("Apagando recibos do mês...");
+        try {
+          for (const app of completedMonthly) {
+            await deleteDoc(doc(db, 'appointments', app.id!));
+            await deleteDoc(doc(db, 'busy_slots', app.id!));
+          }
+          toast.success("Recibos do mês apagados do banco de dados!", { id: loadingToast });
+        } catch (e: any) {
+          toast.error(`Erro ao apagar recibos: ${e.message}`, { id: loadingToast });
+        }
+      };
 
       const [draftSiteData, setDraftSiteData] = useState(() => siteData);
       const [draftServices, setDraftServices] = useState(() => siteServices);
@@ -1816,13 +1912,9 @@ function DashboardView({
     
       const displayAppointments = useMemo(() => {
         return filteredAppointments.filter((app: any) => {
-          if (subTab === 'active') {
-            return app.status === 'pending' || app.status === 'confirmed' || !app.status;
-          } else {
-            return app.status === 'completed' || app.status === 'cancelled';
-          }
+          return app.status === 'pending' || app.status === 'confirmed' || !app.status;
         });
-      }, [filteredAppointments, subTab]);
+      }, [filteredAppointments]);
     
       return (
     <motion.div 
@@ -2019,151 +2111,115 @@ function DashboardView({
                   )}
                 </div>
 
-                <div className="flex border-b border-white/5 gap-6 pt-2">
-                  <button
-                    onClick={() => setSubTab('active')}
-                    className={cn(
-                      "pb-3 text-[10px] font-bold uppercase tracking-[0.2em] relative transition-all",
-                      subTab === 'active' 
-                        ? "text-gold" 
-                        : "text-white/40 hover:text-white"
-                    )}
-                  >
-                    Agenda
-                    {subTab === 'active' && (
-                      <motion.div 
-                        layoutId="activeSubTabUnderline" 
-                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-gold" 
-                      />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setSubTab('history')}
-                    className={cn(
-                      "pb-3 text-[10px] font-bold uppercase tracking-[0.2em] relative transition-all",
-                      subTab === 'history' 
-                        ? "text-gold" 
-                        : "text-white/40 hover:text-white"
-                    )}
-                  >
-                    Histórico
-                    {subTab === 'history' && (
-                      <motion.div 
-                        layoutId="activeSubTabUnderline" 
-                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-gold" 
-                      />
-                    )}
-                  </button>
-                </div>
-
-                <div className="grid gap-4">
+                <div className="grid gap-4 mt-6">
                   {displayAppointments.length === 0 ? (
                     <div className="text-center py-40 bg-zinc-900/10 border border-dashed border-white/5 rounded-sm">
                       <CalendarIcon className="w-16 h-16 text-white/5 mx-auto mb-6" />
                       <p className="text-white/20 font-bold uppercase tracking-[0.5em] text-[10px]">
-                        {subTab === 'active' ? 'Nenhum agendamento ativo para este dia' : 'Nenhum histórico para este dia'}
+                        Nenhum agendamento ativo para este dia
                       </p>
                     </div>
                   ) : (
-                    displayAppointments.map((app: any) => (
-                      <motion.div 
-                        key={app.id}
-                        layout
-                        className="group bg-zinc-900/40 hover:bg-zinc-900 p-6 rounded-sm border border-white/5 hover:border-gold/20 flex flex-col md:flex-row md:items-center justify-between gap-6 transition-all"
-                      >
-                        <div className="flex items-start gap-6">
-                           <div className="relative">
-                              <div className="w-14 h-14 rounded-sm bg-gold/5 border border-gold/10 overflow-hidden flex items-center justify-center flex-shrink-0">
-                                {app.clientPhoto ? (
-                                  <img src={app.clientPhoto} alt="" className="w-full h-full object-cover" />
-                                ) : (
-                                  <User className="w-7 h-7 text-gold/20" />
+                    displayAppointments.map((app: any) => {
+                      return (
+                        <motion.div 
+                          key={app.id}
+                          layout
+                          className="group transition-all rounded-sm border bg-zinc-900/40 hover:bg-zinc-900 p-6 border-white/5 hover:border-gold/20 flex flex-col md:flex-row md:items-center justify-between gap-6"
+                        >
+                          <>
+                            <div className="flex items-start gap-6">
+                              <div className="relative">
+                                <div className="w-14 h-14 rounded-sm bg-gold/5 border border-gold/10 overflow-hidden flex items-center justify-center flex-shrink-0">
+                                  {app.clientPhoto ? (
+                                    <img src={app.clientPhoto} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <User className="w-7 h-7 text-gold/20" />
+                                  )}
+                                </div>
+                                <div className="absolute -top-1 -right-1 flex gap-1">
+                                  {app.status === 'pending' && <div className="w-3 h-3 bg-yellow-500 rounded-full border-2 border-black animate-pulse" title="AGENDADO" />}
+                                  {app.status === 'confirmed' && <div className="w-3 h-3 bg-green-500 rounded-full border-2 border-black" title="EM ANDAMENTO" />}
+                                  {app.status === 'completed' && <div className="w-3 h-3 bg-blue-500 rounded-full border-2 border-black" title="CONCLUÍDO" />}
+                                  {app.status === 'cancelled' && <div className="w-3 h-3 bg-red-500 rounded-full border-2 border-black" title="CANCELADO" />}
+                                </div>
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-3 mb-1">
+                                  <h4 className="font-bold text-xl tracking-tight truncate">{app.clientName || app.name}</h4>
+                                </div>
+                                  <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-bold mb-3 truncate">
+                                    {app.clientEmail || 'E-mail não informado'}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-4 text-[9px] font-bold uppercase tracking-widest mb-3">
+                                    <span className="text-gold bg-gold/10 px-2 py-0.5 border border-gold/20">{app.serviceType || app.serviceName}</span>
+                                    <div className="flex items-center gap-1.5 text-white/60"><Clock className="w-3.5 h-3.5" /> {app.time}</div>
+                                    <div className={cn(
+                                      "px-2 py-0.5 rounded-sm border",
+                                      app.status === 'pending' ? "text-yellow-500 bg-yellow-500/10 border-yellow-500/20" :
+                                      app.status === 'confirmed' ? "text-green-500 bg-green-500/10 border-green-500/20" :
+                                      app.status === 'completed' ? "text-blue-500 bg-blue-500/10 border-blue-500/20" :
+                                      "text-red-500 bg-red-500/10 border-red-500/20"
+                                    )}>
+                                      {app.status === 'pending' ? 'AGENDADO' :
+                                       app.status === 'confirmed' ? 'EM ANDAMENTO' :
+                                       app.status === 'completed' ? 'CONCLUÍDO' : 'CANCELADO'}
+                                    </div>
+                                    {isAdmin && <span className="text-white/20">@ {app.barberName}</span>}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto" onClick={(e) => e.stopPropagation()}>
+                                {app.phone && (
+                                  <a 
+                                    href={`https://wa.me/55${app.phone.replace(/\D/g, '')}`} 
+                                    target="_blank"
+                                    className="w-full md:w-auto bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366] hover:text-white px-4 md:px-6 py-3 rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] flex items-center justify-center gap-2 transition-all border border-[#25D366]/20 cursor-pointer"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
+                                  </a>
                                 )}
+                                <div className="flex items-center gap-2 w-full md:w-auto justify-center">
+                                  {app.status === 'pending' && (
+                                    <>
+                                      <button 
+                                        onClick={() => updateStatus(app.id!, 'confirmed')} 
+                                        className="flex-1 md:flex-none px-4 py-3 bg-green-500 text-white rounded-sm text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all shadow-lg shadow-green-500/20 cursor-pointer"
+                                      >
+                                        Iniciar Corte
+                                      </button>
+                                      <button 
+                                        onClick={() => updateStatus(app.id!, 'cancelled')} 
+                                        className="flex-1 md:flex-none px-4 py-3 bg-white/5 text-white/40 border border-white/10 rounded-sm text-[10px] font-bold uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all cursor-pointer"
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </>
+                                  )}
+                                  {app.status === 'confirmed' && (
+                                    <button 
+                                      onClick={() => updateStatus(app.id!, 'completed')} 
+                                      className="flex-1 md:flex-none px-6 py-3 bg-blue-500 text-white rounded-sm text-[10px] font-bold uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                                    >
+                                      <CheckCircle2 className="w-3.5 h-3.5" /> Concluir Corte
+                                    </button>
+                                  )}
+                                  {(app.status === 'completed' || app.status === 'cancelled' || isAdmin) && (
+                                    <button 
+                                      onClick={() => deleteAppointment(app.id!)} 
+                                      className="p-3 bg-transparent text-white/20 hover:bg-red-600 hover:text-white rounded-sm transition-all flex items-center justify-center border border-white/5 cursor-pointer"
+                                      title="Remover Registro"
+                                    >
+                                      <Trash2 className="w-5 h-5" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                              <div className="absolute -top-1 -right-1 flex gap-1">
-                                {app.status === 'pending' && <div className="w-3 h-3 bg-yellow-500 rounded-full border-2 border-black animate-pulse" title="AGENDADO" />}
-                                {app.status === 'confirmed' && <div className="w-3 h-3 bg-green-500 rounded-full border-2 border-black" title="EM ANDAMENTO" />}
-                                {app.status === 'completed' && <div className="w-3 h-3 bg-blue-500 rounded-full border-2 border-black" title="CONCLUÍDO" />}
-                                {app.status === 'cancelled' && <div className="w-3 h-3 bg-red-500 rounded-full border-2 border-black" title="CANCELADO" />}
-                              </div>
-
-                           </div>
-                           <div className="min-w-0">
-                              <div className="flex items-center gap-3 mb-1">
-                                 <h4 className="font-bold text-xl tracking-tight truncate">{app.clientName || app.name}</h4>
-                              </div>
-                              <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-bold mb-3 truncate">
-                                {app.clientEmail || 'E-mail não informado'}
-                              </p>
-                           <div className="flex flex-wrap items-center gap-4 text-[9px] font-bold uppercase tracking-widest mb-3">
-                                 <span className="text-gold bg-gold/10 px-2 py-0.5 border border-gold/20">{app.serviceType || app.serviceName}</span>
-                                 <div className="flex items-center gap-1.5 text-white/60"><Clock className="w-3.5 h-3.5" /> {app.time}</div>
-                                 <div className={cn(
-                                   "px-2 py-0.5 rounded-sm border",
-                                   app.status === 'pending' ? "text-yellow-500 bg-yellow-500/10 border-yellow-500/20" :
-                                   app.status === 'confirmed' ? "text-green-500 bg-green-500/10 border-green-500/20" :
-                                   app.status === 'completed' ? "text-blue-500 bg-blue-500/10 border-blue-500/20" :
-                                   "text-red-500 bg-red-500/10 border-red-500/20"
-                                 )}>
-                                   {app.status === 'pending' ? 'AGENDADO' :
-                                    app.status === 'confirmed' ? 'EM ANDAMENTO' :
-                                    app.status === 'completed' ? 'CONCLUÍDO' : 'CANCELADO'}
-                                 </div>
-                                 {isAdmin && <span className="text-white/20">@ {app.barberName}</span>}
-                              </div>
-
-                           </div>
-                        </div>
-
-                        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-                           {app.phone && (
-                             <a 
-                               href={`https://wa.me/55${app.phone.replace(/\D/g, '')}`} 
-                               target="_blank"
-                               className="w-full md:w-auto bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366] hover:text-white px-4 md:px-6 py-3 rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] flex items-center justify-center gap-2 transition-all border border-[#25D366]/20"
-                             >
-                               <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
-                             </a>
-                           )}
-                           <div className="flex items-center gap-2 w-full md:w-auto justify-center">
-                              {app.status === 'pending' && (
-                                <>
-                                  <button 
-                                    onClick={() => updateStatus(app.id!, 'confirmed')} 
-                                    className="flex-1 md:flex-none px-4 py-3 bg-green-500 text-white rounded-sm text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all shadow-lg shadow-green-500/20"
-                                  >
-                                    Iniciar Corte
-                                  </button>
-                                  <button 
-                                    onClick={() => updateStatus(app.id!, 'cancelled')} 
-                                    className="flex-1 md:flex-none px-4 py-3 bg-white/5 text-white/40 border border-white/10 rounded-sm text-[10px] font-bold uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all"
-                                  >
-                                    Cancelar
-                                  </button>
-                                </>
-                              )}
-                              {app.status === 'confirmed' && (
-                                <button 
-                                  onClick={() => updateStatus(app.id!, 'completed')} 
-                                  className="flex-1 md:flex-none px-6 py-3 bg-blue-500 text-white rounded-sm text-[10px] font-bold uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> Concluir Corte
-                                </button>
-                              )}
-                              {(app.status === 'completed' || app.status === 'cancelled' || isAdmin) && (
-                                <button 
-                                  onClick={() => deleteAppointment(app.id!)} 
-                                  className="p-3 bg-transparent text-white/20 hover:bg-red-600 hover:text-white rounded-sm transition-all flex items-center justify-center border border-white/5"
-                                  title="Remover Registro"
-                                >
-                                  <Trash2 className="w-5 h-5" />
-                                </button>
-                              )}
-                           </div>
-
-                        </div>
-                      </motion.div>
-                    ))
+                            </>
+                          </motion.div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -3181,27 +3237,201 @@ function DashboardView({
                     </div>
 
                     <div className="grid md:grid-cols-3 gap-8">
-                      <div className="md:col-span-2 bg-zinc-900 border border-white/5 p-8 rounded-sm">
-                        <h3 className="text-xs font-bold uppercase tracking-widest text-gold mb-8 flex items-center gap-2">
-                          <Clock className="w-4 h-4" /> Últimos Atendimentos (Mês)
-                        </h3>
-                        <div className="space-y-4">
-                          {confirmedMonthly.slice(0, 10).map((app: any, i: number) => {
-                            const val = getPriceValue(app);
-                            return (
-                              <div key={i} className="flex items-center justify-between py-3 border-b border-white/5 last:border-0">
-                                <div>
-                                  <p className="text-sm font-bold">{app.clientName || app.name}</p>
-                                  <p className="text-[9px] uppercase tracking-widest text-white/30">{app.serviceType || app.serviceName} • {format(new Date(app.date), 'dd/MM')}</p>
-                                </div>
-                                <p className="text-sm font-mono font-bold text-gold">R$ {val.toLocaleString('pt-BR')}</p>
-                              </div>
-                            );
-                          })}
-                          {confirmedMonthly.length === 0 && (
-                            <p className="text-[10px] uppercase tracking-widest text-white/20 text-center py-10">Nenhum atendimento confirmado este mês</p>
-                          )}
+                      <div className="md:col-span-2 bg-zinc-900 border border-white/5 p-8 rounded-sm h-fit">
+                        <div 
+                          className="flex justify-between items-center cursor-pointer gap-4"
+                          onClick={() => setIsHistoryPanelOpen(!isHistoryPanelOpen)}
+                        >
+                          <h3 className="text-xs font-bold uppercase tracking-widest text-gold flex items-center gap-2 m-0 select-none">
+                            <Clock className="w-4 h-4" /> Histórico & Recibos ({confirmedMonthly.length})
+                          </h3>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 hover:text-white transition-colors duration-150 flex items-center gap-1 select-none">
+                            {isHistoryPanelOpen ? 'Ocultar Detalhes' : 'Clique para Abrir'}
+                            <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isHistoryPanelOpen && "transform rotate-180")} />
+                          </span>
                         </div>
+
+                        {isHistoryPanelOpen && (
+                          <div className="mt-8 animate-in fade-in duration-300">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-white/5 pb-4">
+                              <span className="text-[10px] text-white/40 uppercase tracking-widest font-semibold font-mono">
+                                Gerenciar Recibos e Finanças
+                              </span>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => exportAppointmentsPDF(confirmedMonthly, `recibos_mensais_${format(new Date(), 'yyyy-MM')}.pdf`)}
+                                  className="px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-white/40 hover:text-gold border border-white/5 hover:border-gold/30 rounded-sm bg-zinc-950 transition-all flex items-center gap-1.5 cursor-pointer"
+                                  title="Exportar Relatório em PDF"
+                                >
+                                  <Download className="w-2.5 h-2.5" /> Salvar PDF
+                                </button>
+                                
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const fileInput = document.createElement('input');
+                                    fileInput.type = 'file';
+                                    fileInput.accept = '.json';
+                                    fileInput.onchange = async (e: any) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      
+                                      const reader = new FileReader();
+                                      reader.onload = async (evt: any) => {
+                                        try {
+                                          const importedData = JSON.parse(evt.target.result);
+                                          const dataArray = Array.isArray(importedData) ? importedData : [importedData];
+                                          
+                                          let successCount = 0;
+                                          const loadingToast = toast.loading(`Importando ${dataArray.length} registros...`);
+                                          
+                                          for (const item of dataArray) {
+                                            if (!item.date || !item.time || !item.barberId) continue;
+                                            
+                                            const slotId = `${item.date}_${item.barberId}_${item.time.replace(':', '')}`;
+                                            const appointmentRef = doc(db, 'appointments', slotId);
+                                            const busySlotRef = doc(db, 'busy_slots', slotId);
+                                            
+                                            const appData = { ...item };
+                                            delete appData.id;
+                                            
+                                            if (!appData.createdAt) {
+                                              appData.createdAt = serverTimestamp();
+                                            }
+                                            
+                                            const busyData = {
+                                              date: item.date,
+                                              time: item.time,
+                                              barberId: item.barberId,
+                                              status: item.status || 'pending',
+                                            };
+                                            
+                                            await setDoc(appointmentRef, appData, { merge: true });
+                                            await setDoc(busySlotRef, busyData, { merge: true });
+                                            successCount++;
+                                          }
+                                          
+                                          toast.success(`${successCount} agendamentos importados!`, { id: loadingToast });
+                                        } catch (err: any) {
+                                          toast.error(`Erro: ${err.message}`);
+                                        }
+                                      };
+                                      reader.readAsText(file);
+                                    };
+                                    fileInput.click();
+                                  }}
+                                  className="px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-white/40 hover:text-gold border border-white/5 hover:border-gold/30 rounded-sm bg-zinc-950 transition-all flex items-center gap-1.5 cursor-pointer"
+                                  title="Importar Backup do PC (JSON)"
+                                >
+                                  <Upload className="w-2.5 h-2.5" /> Importar Backup
+                                </button>
+
+                                {confirmedMonthly.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleClearMonthlyReceipts(confirmedMonthly, format(new Date(), 'yyyy-MM'))}
+                                    className="px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-red-500/60 hover:text-red-500 border border-white/5 hover:border-red-500/30 rounded-sm bg-zinc-950 transition-all flex items-center gap-1.5 cursor-pointer"
+                                    title="Limpar Recibos do Mês"
+                                  >
+                                    <Trash2 className="w-2.5 h-2.5" /> Limpar Histórico
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="space-y-3">
+                              {confirmedMonthly
+                                .slice(0, showAllMonthlyReports ? confirmedMonthly.length : 10)
+                                .map((app: any, i: number) => {
+                                  const val = getPriceValue(app);
+                                  const isReportExpanded = expandedReportId === app.id;
+                                  
+                                  return (
+                                    <div 
+                                      key={app.id || i} 
+                                      onClick={() => setExpandedReportId(isReportExpanded ? null : app.id)}
+                                      className={cn(
+                                        "border-b border-white/5 last:border-0 py-3 transition-all cursor-pointer",
+                                        isReportExpanded ? "bg-white/5 p-4 rounded-sm border border-gold/20 mb-3" : "hover:bg-white/5 px-2"
+                                      )}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <p className="text-sm font-bold text-white mb-0.5">{app.clientName || app.name}</p>
+                                          <p className="text-[9px] uppercase tracking-widest text-white/40 mb-0">
+                                            {app.serviceType || app.serviceName} • {format(new Date(app.date), 'dd/MM')} {app.time}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                          <p className="text-sm font-mono font-bold text-gold m-0">R$ {val.toLocaleString('pt-BR')}</p>
+                                          <ChevronDown className={cn("w-3.5 h-3.5 text-white/20 hover:text-gold transition-all", isReportExpanded && "transform rotate-180")} />
+                                        </div>
+                                      </div>
+                                      
+                                      {isReportExpanded && (
+                                        <motion.div 
+                                          initial={{ opacity: 0, height: 0 }}
+                                          animate={{ opacity: 1, height: 'auto' }}
+                                          className="mt-4 pt-4 border-t border-white/5 text-[10px] uppercase font-bold tracking-wider text-white/60 space-y-2"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <p className="mb-1"><span className="text-white/30 mr-2">E-mail:</span> {app.clientEmail || 'Não informado'}</p>
+                                          <p className="mb-1"><span className="text-white/30 mr-2">Telefone:</span> {app.phone || 'Não informado'}</p>
+                                          <p className="mb-1"><span className="text-white/30 mr-2">Barbeiro:</span> {app.barberName || 'Não informado'}</p>
+                                          <p className="mb-3"><span className="text-white/30 mr-2">Status:</span> 
+                                            <span className="ml-2 text-green-500 bg-green-500/10 px-1.5 py-0.5 border border-green-500/20 rounded-sm">
+                                              {app.status === 'completed' ? 'CONCLUÍDO' : 'CONFIRMADO'}
+                                            </span>
+                                          </p>
+                                          <div className="flex gap-2">
+                                            {app.phone && (
+                                              <a 
+                                                href={`https://wa.me/55${app.phone.replace(/\D/g, '')}`} 
+                                                target="_blank"
+                                                className="bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366] hover:text-white px-3 py-1.5 rounded-sm text-[8px] font-bold tracking-[0.2em] flex items-center gap-1.5 transition-all border border-[#25D366]/20 cursor-pointer"
+                                              >
+                                                <MessageSquare className="w-3 h-3" /> WhatsApp
+                                              </a>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const confirmRefund = window.confirm(`Deseja realmente excluir/reembolsar este recibo de R$ {val} do cliente {app.clientName || app.name}?`);
+                                                if (confirmRefund) {
+                                                  deleteAppointment(app.id!);
+                                                  setExpandedReportId(null);
+                                                }
+                                              }}
+                                              className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white px-3 py-1.5 rounded-sm text-[8px] font-bold tracking-[0.2em] flex items-center gap-1.5 transition-all border border-red-500/20 cursor-pointer"
+                                            >
+                                              <Trash2 className="w-3 h-3" /> Excluir Registro
+                                            </button>
+                                          </div>
+                                        </motion.div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              
+                              {confirmedMonthly.length > 10 && (
+                                <div className="text-center pt-4">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowAllMonthlyReports(!showAllMonthlyReports)}
+                                    className="px-4 py-2 text-[9px] font-bold uppercase tracking-widest text-[#FFF]/60 hover:text-gold border border-white/5 hover:border-gold/30 rounded-sm bg-zinc-950 transition-all cursor-pointer"
+                                  >
+                                    {showAllMonthlyReports ? 'Recolher Lista' : `Ver Todos os ${confirmedMonthly.length} Recibos`}
+                                  </button>
+                                </div>
+                              )}
+                              
+                              {confirmedMonthly.length === 0 && (
+                                <p className="text-[10px] uppercase tracking-widest text-white/20 text-center py-10">Nenhum atendimento confirmado este mês</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <div className="bg-zinc-900 border border-white/5 p-8 rounded-sm">
