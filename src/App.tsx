@@ -494,7 +494,7 @@ export default function App() {
         const appData = {
           ...formData,
           servicePrice, // Save price at the time of booking
-          clientName: user.displayName || 'Cliente',
+          clientName: formData.name || user.displayName || 'Cliente',
           clientEmail: user.email,
           clientPhoto: user.photoURL || '',
           clientId: user.uid,
@@ -1651,7 +1651,7 @@ function DashboardView({
             return [
               app.date || '',
               app.time || '',
-              app.clientName || app.name || '',
+              app.name || app.clientName || '',
               app.serviceType || app.serviceName || '',
               `R$ ${cleanPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
               app.status === 'completed' ? 'CONCLUIDO' : app.status === 'confirmed' ? 'CONFIRMADO' : app.status === 'pending' ? 'AGENDADO' : 'CANCELADO',
@@ -2146,7 +2146,7 @@ function DashboardView({
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-3 mb-1">
-                                  <h4 className="font-bold text-xl tracking-tight truncate">{app.clientName || app.name}</h4>
+                                  <h4 className="font-bold text-xl tracking-tight truncate">{app.name || app.clientName}</h4>
                                 </div>
                                   <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-bold mb-3 truncate">
                                     {app.clientEmail || 'E-mail não informado'}
@@ -3358,7 +3358,7 @@ function DashboardView({
                                     >
                                       <div className="flex items-center justify-between">
                                         <div>
-                                          <p className="text-sm font-bold text-white mb-0.5">{app.clientName || app.name}</p>
+                                          <p className="text-sm font-bold text-white mb-0.5">{app.name || app.clientName}</p>
                                           <p className="text-[9px] uppercase tracking-widest text-white/40 mb-0">
                                             {app.serviceType || app.serviceName} • {format(new Date(app.date), 'dd/MM')} {app.time}
                                           </p>
@@ -3397,7 +3397,7 @@ function DashboardView({
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                const confirmRefund = window.confirm(`Deseja realmente excluir/reembolsar este recibo de R$ {val} do cliente {app.clientName || app.name}?`);
+                                                const confirmRefund = window.confirm(`Deseja realmente excluir/reembolsar este recibo de R$ ${val} do cliente ${app.name || app.clientName}?`);
                                                 if (confirmRefund) {
                                                   deleteAppointment(app.id!);
                                                   setExpandedReportId(null);
