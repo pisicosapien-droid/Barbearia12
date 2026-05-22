@@ -45,6 +45,31 @@ import { cn } from './lib/utils';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, addMonths, subMonths, startOfToday, isBefore, startOfDay, isSameMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+const formatInBrasilia = (date: Date) => {
+  try {
+    const formatter = new Intl.DateTimeFormat('fr-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const adjustedDate = new Date(date.getTime());
+    // Adjust calendar day dates (which have 0 hours) to 12:00 (midday)
+    // so timezone conversion back to Brasilia doesn't shift the day backwards!
+    if (adjustedDate.getHours() === 0 && adjustedDate.getMinutes() === 0) {
+      adjustedDate.setHours(12);
+    }
+    return formatter.format(adjustedDate);
+  } catch (e) {
+    return format(date, 'yyyy-MM-dd');
+  }
+};
+
+const getBrasiliaToday = () => {
+  const nowInBrasilia = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  return new Date(`${nowInBrasilia.getFullYear()}-${String(nowInBrasilia.getMonth() + 1).padStart(2, '0')}-${String(nowInBrasilia.getDate()).padStart(2, '0')}T12:00:00`);
+};
+
 export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [userRole, setUserRole] = useState<'admin' | 'barber' | null>(null);
@@ -87,7 +112,7 @@ export default function App() {
   const [siteData, setSiteData] = useState(BARBERSHOP_DATA);
   const [siteServices, setSiteServices] = useState(SERVICES);
   const [siteGallery, setSiteGallery] = useState(GALLERY_IMAGES);
-  const [dashboardDate, setDashboardDate] = useState<Date>(startOfToday());
+  const [dashboardDate, setDashboardDate] = useState<Date>(getBrasiliaToday());
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -1242,23 +1267,36 @@ export default function App() {
                         ) : (
                           getAvailableSlots().map(slot => {
                             const isBusy = busySlots.includes(slot);
+                            
+                            // Capture actual timezone time (Brasilia/Sao_Paulo: UTC-3)
+                            const nowInBrasilia = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+                            const todayStr = formatInBrasilia(new Date());
+                            const isTodaySelected = formData.date === todayStr;
+
+                            const [slotHour, slotMin] = slot.split(':').map(Number);
+                            const nowHour = nowInBrasilia.getHours();
+                            const nowMin = nowInBrasilia.getMinutes();
+
+                            const isPast = isTodaySelected && (slotHour < nowHour || (slotHour === nowHour && slotMin < nowMin));
+                            const isDisabled = isBusy || isPast;
+
                             return (
                               <button
                                 key={slot}
                                 type="button"
-                                disabled={isBusy}
+                                disabled={isDisabled}
                                 onClick={() => setFormData({...formData, time: slot})}
                                 className={cn(
                                   "py-2 px-1 text-[10px] font-mono font-bold rounded-sm border transition-all relative overflow-hidden",
                                   formData.time === slot
                                     ? "bg-gold border-gold text-black shadow-[0_0_15px_rgba(255,215,0,0.3)]"
-                                    : isBusy
+                                    : isDisabled
                                       ? "bg-red-500/10 border-red-500/20 text-red-500/40 cursor-not-allowed"
                                       : "bg-white/5 border-white/10 text-white/60 hover:border-gold hover:text-gold"
                                 )}
                               >
                                 {slot}
-                                {isBusy && (
+                                {isDisabled && (
                                   <div className="absolute inset-x-0 top-1/2 h-[1px] bg-red-500/20 -rotate-12 pointer-events-none" />
                                 )}
                               </button>
@@ -1562,6 +1600,7 @@ function DashboardView({
     }: any) {
       const calendarMonth = useState(new Date())[0]; // Logic preserved for structure, but set via setter below
       const [currentMonth, setCurrentMonth] = useState(new Date());
+      const [subTab, setSubTab] = useState<'active' | 'history'>('active');
 
       const [draftSiteData, setDraftSiteData] = useState(() => siteData);
       const [draftServices, setDraftServices] = useState(() => siteServices);
@@ -1757,19 +1796,33 @@ function DashboardView({
     
       // Appointments count per day for current month (filtered by selected barber)
       const appByDay = useMemo(() => appointments.reduce((acc: any, app: any) => {
-        const isBarberMatch = selectedBarberId === 'all' || app.barberId === selectedBarberId;
+        const isBarberMatch = isAdmin 
+          ? (selectedBarberId === 'all' || app.barberId === selectedBarberId)
+          : (app.barberId === user?.uid);
         if (!isBarberMatch) return acc;
         
         const date = app.date;
         acc[date] = (acc[date] || 0) + 1;
         return acc;
-      }, {}), [appointments, selectedBarberId]);
+      }, {}), [appointments, selectedBarberId, isAdmin, user]);
     
       const filteredAppointments = useMemo(() => appointments.filter((a: any) => {
-        const isBarberMatch = selectedBarberId === 'all' || a.barberId === selectedBarberId;
-        const isDateMatch = a.date === format(dashboardDate, 'yyyy-MM-dd');
+        const isBarberMatch = isAdmin 
+          ? (selectedBarberId === 'all' || a.barberId === selectedBarberId)
+          : (a.barberId === user?.uid);
+        const isDateMatch = a.date === formatInBrasilia(dashboardDate);
         return isBarberMatch && isDateMatch;
-      }), [appointments, selectedBarberId, dashboardDate]);
+      }), [appointments, selectedBarberId, dashboardDate, isAdmin, user]);
+    
+      const displayAppointments = useMemo(() => {
+        return filteredAppointments.filter((app: any) => {
+          if (subTab === 'active') {
+            return app.status === 'pending' || app.status === 'confirmed' || !app.status;
+          } else {
+            return app.status === 'completed' || app.status === 'cancelled';
+          }
+        });
+      }, [filteredAppointments, subTab]);
     
       return (
     <motion.div 
@@ -1919,7 +1972,7 @@ function DashboardView({
                 {/* Stats Bar */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[
-                    { label: 'No Dia', val: appointments.filter((a: any) => a.date === format(dashboardDate, 'yyyy-MM-dd')).length, icon: CalendarIcon },
+                    { label: 'No Dia', val: appointments.filter((a: any) => a.date === formatInBrasilia(dashboardDate)).length, icon: CalendarIcon },
                     { label: 'Pendentes', val: appointments.filter((a: any) => a.status === 'pending').length, icon: Clock, color: 'text-yellow-500' },
                     { label: 'Confirmados', val: appointments.filter((a: any) => a.status === 'confirmed').length, icon: CheckCircle2, color: 'text-green-500' },
                     { label: 'Total', val: appointments.length, icon: Scissors },
@@ -1966,14 +2019,53 @@ function DashboardView({
                   )}
                 </div>
 
+                <div className="flex border-b border-white/5 gap-6 pt-2">
+                  <button
+                    onClick={() => setSubTab('active')}
+                    className={cn(
+                      "pb-3 text-[10px] font-bold uppercase tracking-[0.2em] relative transition-all",
+                      subTab === 'active' 
+                        ? "text-gold" 
+                        : "text-white/40 hover:text-white"
+                    )}
+                  >
+                    Agenda
+                    {subTab === 'active' && (
+                      <motion.div 
+                        layoutId="activeSubTabUnderline" 
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-gold" 
+                      />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setSubTab('history')}
+                    className={cn(
+                      "pb-3 text-[10px] font-bold uppercase tracking-[0.2em] relative transition-all",
+                      subTab === 'history' 
+                        ? "text-gold" 
+                        : "text-white/40 hover:text-white"
+                    )}
+                  >
+                    Histórico
+                    {subTab === 'history' && (
+                      <motion.div 
+                        layoutId="activeSubTabUnderline" 
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-gold" 
+                      />
+                    )}
+                  </button>
+                </div>
+
                 <div className="grid gap-4">
-                  {filteredAppointments.length === 0 ? (
+                  {displayAppointments.length === 0 ? (
                     <div className="text-center py-40 bg-zinc-900/10 border border-dashed border-white/5 rounded-sm">
                       <CalendarIcon className="w-16 h-16 text-white/5 mx-auto mb-6" />
-                      <p className="text-white/20 font-bold uppercase tracking-[0.5em] text-[10px]">Nenhum agendamento para este dia</p>
+                      <p className="text-white/20 font-bold uppercase tracking-[0.5em] text-[10px]">
+                        {subTab === 'active' ? 'Nenhum agendamento ativo para este dia' : 'Nenhum histórico para este dia'}
+                      </p>
                     </div>
                   ) : (
-                    filteredAppointments.map((app: any) => (
+                    displayAppointments.map((app: any) => (
                       <motion.div 
                         key={app.id}
                         layout
@@ -2101,9 +2193,11 @@ function DashboardView({
 
                   <div className="grid grid-cols-7 gap-1">
                     {daysInMonth.map((day, i) => {
-                      const dateStr = format(day, 'yyyy-MM-dd');
-                      const hasApps = appByDay[dateStr] > 0;
-                      const isSelected = isSameDay(day, dashboardDate);
+                      const dateStr = formatInBrasilia(day);
+                      const todayStr = formatInBrasilia(new Date());
+                      const isPastDay = dateStr < todayStr;
+                      const hasApps = appByDay[dateStr] > 0 && !isPastDay;
+                      const isSelected = formatInBrasilia(day) === formatInBrasilia(dashboardDate);
                       const isCurrentMonth = isSameMonth(day, calendarMonth);
                       
                       return (
@@ -2128,8 +2222,8 @@ function DashboardView({
 
                   <button 
                     onClick={() => {
-                        setDashboardDate(startOfToday());
-                        setCurrentMonth(new Date());
+                        setDashboardDate(getBrasiliaToday());
+                        setCurrentMonth(getBrasiliaToday());
                     }}
                     className="w-full mt-6 py-2 border border-white/5 text-[9px] font-bold uppercase tracking-widest text-white/20 hover:text-white hover:border-gold/30 transition-all"
                   >
@@ -3046,7 +3140,7 @@ function DashboardView({
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                {/* Metrics Calculation */}
                {(() => {
-                 const currentMonthStr = format(new Date(), 'yyyy-MM');
+                 const currentMonthStr = formatInBrasilia(new Date()).substring(0, 7);
                  const monthlyApps = appointments.filter((a: any) => a.date.startsWith(currentMonthStr));
                  const confirmedMonthly = monthlyApps.filter((a: any) => a.status === 'confirmed');
                  
