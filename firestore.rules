@@ -14,8 +14,7 @@ service cloud.firestore {
       return isSignedIn() && (
              (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && getUserData().role == 'admin') ||
              request.auth.token.email == 'pisicosapien@gmail.com' ||
-             request.auth.token.email == 'psicosapiens@gmail.com' ||
-             request.auth.token.email == 'murilobiazi@outlook.com'
+             request.auth.token.email == 'psicosapiens@gmail.com'
       );
     }
 
@@ -60,7 +59,7 @@ service cloud.firestore {
       allow read, list: if isSignedIn();
       allow create: if isSignedIn() && request.auth.uid == adminId && (
         isAdmin() || 
-        request.auth.token.email in ['pisicosapien@gmail.com', 'psicosapiens@gmail.com', 'murilobiazi@outlook.com']
+        request.auth.token.email in ['pisicosapien@gmail.com', 'psicosapiens@gmail.com']
       );
       allow update: if isAdmin() || (
         isSignedIn() && request.auth.uid == adminId && 

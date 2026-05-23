@@ -1,6 +1,6 @@
 {
-  "name": "Barbearia D'Biazzi",
-  "description": "Landing page and scheduling system for Barbearia D'Biazzi in Jundiaí-SP.",
+  "name": "Barbearia",
+  "description": "Portfólio de Barbearia - Landing page e sistema de agendamento online.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FormEvent, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, FormEvent, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Instagram, 
@@ -50,6 +50,44 @@ import { ptBR } from 'date-fns/locale';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+const RenderLogo = ({ url, className, size = 'md' }: { url?: string; className?: string; size?: 'xs' | 'sm' | 'nav' | 'md' | 'lg' | 'xl' }) => {
+  const sizeClasses = {
+    xs: 'w-8 h-8',
+    sm: 'w-10 h-10',
+    nav: 'w-[43.2px] h-[43.2px]',
+    md: 'w-16 h-16',
+    lg: 'w-24 h-24',
+    xl: 'w-28 h-28'
+  };
+  
+  const selectedSize = sizeClasses[size] || sizeClasses.md;
+
+  if (url) {
+    return (
+      <img 
+        src={url} 
+        className={cn("object-contain rounded-full transition-all duration-300", selectedSize, className)} 
+        alt="Logo" 
+        onError={(e: any) => e.target.style.display = 'none'} 
+      />
+    );
+  }
+  
+  return (
+    <div className={cn("relative flex flex-col items-center justify-center border border-gold/30 rounded-full bg-black/80 aspect-square select-none overflow-hidden", selectedSize, className)}>
+      <div className="absolute inset-0 bg-gradient-to-tr from-gold/10 via-transparent to-gold/5" />
+      <div className="absolute inset-1 border border-gold/10 rounded-full border-dashed" />
+      <Scissors className="w-1/3 h-1/3 text-gold/30 mb-0.5 animate-pulse-slow animate-spin-slow" />
+      <span className="font-display font-medium uppercase italic text-gold text-[7px] md:text-[8px] tracking-[0.1em] leading-none text-center">
+        Sua Logo
+      </span>
+      <span className="font-sans font-bold text-white/40 text-[5px] md:text-[6px] uppercase tracking-[0.05em] scale-90 leading-none">
+        Aqui
+      </span>
+    </div>
+  );
+};
+
 const formatInBrasilia = (date: Date) => {
   try {
     const formatter = new Intl.DateTimeFormat('fr-CA', {
@@ -94,6 +132,31 @@ export default function App() {
   const toggleDashboardView = (val: boolean) => {
     setIsDashboardView(val);
     localStorage.setItem('isDashboardView', val.toString());
+  };
+
+  const handleSymbolicClick = (e: React.MouseEvent, type: 'whatsapp' | 'instagram' | 'facebook' | 'email' | 'phone') => {
+    e.preventDefault();
+    const messages = {
+      whatsapp: "📲 Link demonstrativo. No projeto final, seu WhatsApp será adicionado aqui.",
+      instagram: "📸 Link demonstrativo. No projeto final, seu Instagram será adicionado aqui.",
+      facebook: "👥 Link demonstrativo. No projeto final, seu Facebook será adicionado aqui.",
+      email: "✉️ Link demonstrativo. No projeto final, seu e-mail será adicionado aqui.",
+      phone: "📞 Link demonstrativo. No projeto final, seu número de telefone será adicionado aqui."
+    };
+    
+    toast.success(messages[type], {
+      duration: 6000,
+      icon: '✨',
+      style: {
+        background: '#18181b',
+        color: '#fff',
+        border: '1px solid rgba(255, 215, 0, 0.3)',
+        fontSize: '13px',
+        lineHeight: '1.4',
+        padding: '12px 16px',
+        borderRadius: '8px'
+      }
+    });
   };
   const [adminTab, setAdminTab] = useState<'appointments' | 'site' | 'barbers' | 'reports'>('appointments');
   const [siteTab, setSiteTab] = useState<'geral' | 'hero' | 'servicos' | 'sobre' | 'galeria' | 'contato' | 'depoimentos'>('geral');
@@ -273,7 +336,23 @@ export default function App() {
       unsub = onSnapshot(doc(db, 'settings', 'website'), (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          setSiteData(prev => ({ ...prev, ...data }));
+          // Force generic/symbolic master template values for presentation
+          const cleanData = {
+            ...data,
+            name: "Barbearia",
+            title: "Barbearia",
+            slogan: "Seu estilo, sua experiência!",
+            about: "Trabalhando com qualidade nos serviços prestados e um atendimento realmente diferenciado. Nossa barbearia conta com uma estrutura moderna, ambiente aconchegante e agradável, além de profissionais barbeiros altamente qualificados para atender você com o máximo de conforto, agilidade e estilo.",
+            phone: "11999999999",
+            phoneDisplay: "(11) 99999-9999",
+            email: "contato@suabarbearia.com",
+            address: "Av. Paulista, 1000 - Bela Vista, São Paulo - SP",
+            zipCode: "01310-100",
+            instagram: "suabarbearia",
+            facebook: "suabarbearia",
+            mapsEmbed: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3657.1975815610815!2d-46.6565158!3d-23.5614919!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMjPCsDMzJzQxLjQiUyA0NsKwMzknMjMuNSJX!5e0!3m2!1spt-BR!2sbr!4v1716060000000!5m2!1spt-BR!2sbr"
+          };
+          setSiteData(prev => ({ ...prev, ...cleanData }));
           if (data.services) setSiteServices(data.services);
           if (data.galleryImages) setSiteGallery(data.galleryImages);
         }
@@ -883,11 +962,7 @@ export default function App() {
       <div className="min-h-screen bg-black flex flex-col items-center justify-center">
         <div className="relative">
           <div className="w-20 h-20 border-2 border-gold/10 border-t-gold rounded-full animate-spin" />
-          {siteData.logoUrl ? (
-            <img src={siteData.logoUrl} className="absolute inset-0 m-auto w-8 h-8 object-contain animate-pulse" alt="Logo" />
-          ) : (
-            <Scissors className="absolute inset-0 m-auto w-8 h-8 text-gold animate-pulse" />
-          )}
+          <RenderLogo url={siteData.logoUrl} className="absolute inset-0 m-auto" size="xs" />
         </div>
         <p className="mt-8 text-[10px] uppercase tracking-[0.4em] text-white/40 font-bold animate-pulse">Sincronizando Sistema...</p>
       </div>
@@ -1093,20 +1168,15 @@ export default function App() {
                     )} 
                     alt="Logo Arrastável"
                   />
-                ) : siteData.logoUrl ? (
-                  <img 
-                    src={siteData.logoUrl} 
+                ) : (
+                  <RenderLogo 
+                    url={siteData.logoUrl} 
                     className={cn(
-                      "w-[43.2px] h-[43.2px] object-contain transition-transform duration-300",
+                      "transition-transform duration-300",
                       logoDragX > 10 ? "rotate-45" : "rotate-0"
                     )} 
-                    alt="Logo"
+                    size="nav"
                   />
-                ) : (
-                  <Scissors className={cn(
-                    "text-gold w-[43.2px] h-[43.2px] transition-transform duration-300",
-                    logoDragX > 10 ? "rotate-45" : "rotate-0"
-                  )} />
                 )}
                 {logoDragX > 110 && (
                   <motion.div 
@@ -1117,7 +1187,7 @@ export default function App() {
                 )}
               </div>
               <span className="font-display font-bold tracking-tight text-xl uppercase italic select-none">
-                {logoDragX > 100 ? 'Acessar' : 'D\'Biazzi'}
+                {logoDragX > 100 ? 'Acessar' : siteData.name}
               </span>
               
               {/* Tooltip hint */}
@@ -1210,17 +1280,6 @@ export default function App() {
         </div>
 
         <div className="relative z-20 text-center px-6">
-          <motion.img 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            src={siteData.logoUrl || "/LOGO.png"} 
-            className={cn(
-              "w-28 h-28 mx-auto mb-10 object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]",
-              !siteData.logoUrl && "grayscale invert brightness-200"
-            )}
-            alt="Logo"
-            onError={(e: any) => e.target.style.display = 'none'}
-          />
           <motion.h1 
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1253,7 +1312,7 @@ export default function App() {
             <AnimatePresence mode="popLayout">
             {!scrolled && (
               <motion.a 
-                href={`https://wa.me/55${siteData.phone}`}
+                href={`https://wa.me/55${siteData.phone}`} onClick={(e) => handleSymbolicClick(e, 'whatsapp')}
                 target="_blank"
                 initial={{ opacity: 0, y: 40, scale: 0.8 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1285,7 +1344,7 @@ export default function App() {
         <div className="section-container">
           <div className="text-center mb-16">
             <h2 className="heading-secondary">Serviços</h2>
-            <p className="text-white/50 max-w-md mx-auto mt-4 px-4">Cortes clássicos, modernos e barboterapia premiada no coração de Jundiaí.</p>
+            <p className="text-white/50 max-w-md mx-auto mt-4 px-4">Cortes clássicos, modernos e barboterapia premiada para o seu estilo.</p>
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1812,7 +1871,7 @@ export default function App() {
               className="relative h-full min-h-[300px] border border-white/10 p-1 overflow-hidden rounded-sm transition-all duration-700 group cursor-pointer"
             >
                <a 
-                 href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent("Barbearia D'Biazzi, Rua Bom Jesus de Pirapora, 2523 - Vila Rami, Jundiaí - SP")}`}
+                 href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${siteData.name}, ${siteData.address}`)}`}
                  target="_blank"
                  rel="noopener noreferrer"
                  className="absolute inset-0 z-10 select-none block"
@@ -1833,7 +1892,7 @@ export default function App() {
                  </div>
                </a>
                <iframe
-                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3663.8569429446387!2d-46.88414452504825!3d-23.211831348810243!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x94cf269784196147%3A0xe5a14f494a86b1f!2sBarbearia%20D'Biazzi!5e0!3m2!1spt-BR!2sbr!4v1716060000000!5m2!1spt-BR!2sbr"
+                  src={siteData.mapsEmbed}
                   className="w-full h-full min-h-[300px] pointer-events-none"
                   style={{ border: 0 }}
                   allowFullScreen
@@ -1849,13 +1908,13 @@ export default function App() {
       <footer className="bg-black py-16 px-6 border-t border-white/5 text-center">
          <div className="max-w-4xl mx-auto">
            <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 mb-10 text-white/40">
-              <a href={`https://instagram.com/${siteData.instagram}`} target="_blank" className="flex items-center gap-2 hover:text-gold transition-colors text-[11px] font-bold uppercase tracking-widest">
-                <Instagram className="w-4 h-4" /> @{siteData.instagram}
+              <a href={`https://instagram.com/${siteData.instagram}`} onClick={(e) => handleSymbolicClick(e, 'instagram')} target="_blank" className="flex items-center gap-2 hover:text-gold transition-colors text-[11px] font-bold uppercase tracking-widest">
+                <Instagram className="w-4 h-4" /> @{siteData.instagram}</a><a href="#" onClick={(e) => handleSymbolicClick(e, 'facebook')} target="_blank" className="flex items-center gap-2 hover:text-gold transition-colors text-[11px] font-bold uppercase tracking-widest"><Facebook className="w-4 h-4" /> Facebook
               </a>
-              <a href={`mailto:${siteData.email}`} className="flex items-center gap-2 hover:text-gold transition-colors text-[11px] font-bold uppercase tracking-widest">
+              <a href={`mailto:${siteData.email}`} onClick={(e) => handleSymbolicClick(e, 'email')} className="flex items-center gap-2 hover:text-gold transition-colors text-[11px] font-bold uppercase tracking-widest">
                 <Mail className="w-4 h-4" /> {siteData.email}
               </a>
-              <a href={`tel:+55${siteData.phone}`} className="flex items-center gap-2 hover:text-gold transition-colors text-[11px] font-bold uppercase tracking-widest">
+              <a href={`tel:+55${siteData.phone}`} onClick={(e) => handleSymbolicClick(e, 'phone')} className="flex items-center gap-2 hover:text-gold transition-colors text-[11px] font-bold uppercase tracking-widest">
                 <Phone className="w-4 h-4" /> {siteData.phoneDisplay}
               </a>
            </div>
@@ -1896,7 +1955,7 @@ export default function App() {
             </motion.div>
 
             <motion.a
-              href={`https://wa.me/55${siteData.phone}`} 
+              href={`https://wa.me/55${siteData.phone}`} onClick={(e) => handleSymbolicClick(e, 'whatsapp')}
               target="_blank"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
@@ -2311,16 +2370,12 @@ function DashboardView({
         {/* Dashboard Header */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-6 border-b border-white/5 pb-8">
            <div className="flex items-center gap-6">
-              <div className="w-16 h-16 rounded-sm bg-gold flex items-center justify-center shadow-[0_0_30px_rgba(255,215,0,0.2)] p-2 overflow-hidden">
-                 {siteData.logoUrl ? (
-                   <img src={siteData.logoUrl} className="w-10 h-10 object-contain brightness-0" alt="Logo" />
-                 ) : (
-                   <Scissors className="text-black w-8 h-8" />
-                 )}
+              <div className="w-16 h-16 rounded-sm bg-gold/10 flex items-center justify-center shadow-[0_0_30px_rgba(255,215,0,0.1)] overflow-hidden">
+                 <RenderLogo url={siteData.logoUrl} size="sm" className="border-none bg-transparent" />
               </div>
               <div>
                 <h2 className="text-3xl font-display font-bold uppercase italic tracking-tighter leading-none mb-2">
-                  D'Biazzi <span className="text-gold/50 ml-2">Painel</span>
+                  {siteData.name} <span className="text-gold/50 ml-2">Painel</span>
                 </h2>
                 <div className="flex items-center gap-3">
                   <span className="text-white/20 text-[10px] uppercase tracking-[0.3em] font-bold">Logado como</span>
@@ -2416,15 +2471,11 @@ function DashboardView({
           {!isAdmin && userRole === 'barber' && appointments.length === 0 && (
             <div className="mb-12 bg-zinc-900 border border-gold/20 p-8 rounded-sm animate-in fade-in slide-in-from-top-4 duration-700">
                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center text-gold p-2 overflow-hidden">
-                     {siteData.logoUrl ? (
-                       <img src={siteData.logoUrl} className="w-8 h-8 object-contain" alt="Logo" />
-                     ) : (
-                       <Scissors className="w-6 h-6" />
-                     )}
+                  <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center text-gold p-2 overflow-hidden border border-gold/20">
+                     <RenderLogo url={siteData.logoUrl} size="xs" className="border-none bg-transparent" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-display font-bold uppercase italic tracking-tight">Bem-vindo à D'Biazzi, {user?.displayName?.split(' ')[0]}!</h2>
+                    <h2 className="text-xl font-display font-bold uppercase italic tracking-tight">Bem-vindo à {siteData.name}, {user?.displayName?.split(' ')[0]}!</h2>
                     <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Status: Acesso em Análise</p>
                   </div>
                </div>

@@ -1,18 +1,18 @@
 import { Service, Testimonial } from "./types";
 
 export const BARBERSHOP_DATA = {
-  name: "Barbearia D'Biazzi",
-  title: "Barbearia D'Biazzi",
-  slogan: "Seu estilo no seu estilo!",
-  about: "Desde 2015 trazendo qualidade nos serviços prestados e um atendimento diferenciado. A Barbearia D'Biazzi teve início na sala de casa, onde por algum tempo realizamos os atendimentos de nossos clientes. Após a grande procura, em Maio de 2017, mudamos de endereço para um novo espaço maior, mais aconchegante e agradável, contando com mais profissionais barbeiros para atender melhor nossos amigos e clientes.",
-  phone: "11974314484",
-  phoneDisplay: "(11) 97431-4484",
-  email: "murilobiazi@outlook.com",
-  address: "Rua Bom Jesus de Pirapora, 2523 - Vila Rami, Jundiaí - SP",
-  zipCode: "13206-305",
-  instagram: "barbeariadbiazzi",
-  facebook: "barbeariadbiazzi",
-  mapsEmbed: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3663.8569429446387!2d-46.88414452504825!3d-23.211831348810243!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x94cf269784196147%3A0xe5a14f494a86b1f!2sBarbearia%20D'Biazzi!5e0!3m2!1spt-BR!2sbr!4v1716060000000!5m2!1spt-BR!2sbr",
+  name: "Barbearia",
+  title: "Barbearia",
+  slogan: "Seu estilo, sua experiência!",
+  about: "Trabalhando com qualidade nos serviços prestados e um atendimento realmente diferenciado. Nossa barbearia conta com uma estrutura moderna, ambiente aconchegante e agradável, além de profissionais barbeiros altamente qualificados para atender você com o máximo de conforto, agilidade e estilo.",
+  phone: "11999999999",
+  phoneDisplay: "(11) 99999-9999",
+  email: "contato@suabarbearia.com",
+  address: "Av. Paulista, 1000 - Bela Vista, São Paulo - SP",
+  zipCode: "01310-100",
+  instagram: "suabarbearia",
+  facebook: "suabarbearia",
+  mapsEmbed: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3657.1975815610815!2d-46.6565158!3d-23.5614919!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMjPCsDMzJzQxLjQiUyA0NsKwMzknMjMuNSJX!5e0!3m2!1spt-BR!2sbr!4v1716060000000!5m2!1spt-BR!2sbr",
   logoUrl: "",
   dragLogoUrl: ""
 };
@@ -41,9 +41,7 @@ export const OPENING_HOURS = [
 
 export const AUTHORIZED_EMAILS = [
   "pisicosapien@gmail.com",
-  "psicosapiens@gmail.com",
-  "murilobiazi@outlook.com",
-  "murilobiazi@outlook"
+  "psicosapiens@gmail.com"
 ];
 
 export const GALLERY_IMAGES = [
