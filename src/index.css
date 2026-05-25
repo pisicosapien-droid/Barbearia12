@@ -5,6 +5,13 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  
   html {
     scroll-behavior: smooth;
     /* Prevent horizontal overshoot scroll bouncing issues in Safari/Mac */
@@ -13,6 +20,18 @@
   body {
     @apply bg-black text-white font-sans selection:bg-gold selection:text-black;
     overflow-x: hidden;
+    color: #ffffff !important; /* Explicitly guarantee contrast in inverted browsers */
+  }
+
+  /* Reset default tap highlights and form elements style overrides on iOS and Samsung Internet */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Ensure auto-detected phone/email/data links on mobile maintain parent colors */
+  a, a[href^="tel"], a[href^="mailto"] {
+    color: inherit;
+    text-decoration: none;
   }
 }
 
@@ -39,6 +58,30 @@
   .backdrop-blur-lg {
     -webkit-backdrop-filter: blur(16px) !important;
     backdrop-filter: blur(16px) !important;
+  }
+
+  /* Secure WebKit text gradient clipping */
+  .bg-clip-text {
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+  }
+
+  /* Prevent SVG icon collapse in Safari/Samsung Internet flex layouts */
+  svg, .lucide {
+    flex-shrink: 0 !important;
+    -webkit-flex-shrink: 0 !important;
+  }
+
+  /* Prevent flex layouts from breaking and collapsing components to very small dimensions */
+  .flex-shrink-0 {
+    flex-shrink: 0 !important;
+    -webkit-flex-shrink: 0 !important;
+  }
+
+  /* Smooth image rendering on mobile browsers */
+  img {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
   }
 }
 
