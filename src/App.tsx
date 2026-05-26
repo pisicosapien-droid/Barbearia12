@@ -113,6 +113,89 @@ const getBrasiliaToday = () => {
   return new Date(`${nowInBrasilia.getFullYear()}-${String(nowInBrasilia.getMonth() + 1).padStart(2, '0')}-${String(nowInBrasilia.getDate()).padStart(2, '0')}T12:00:00`);
 };
 
+const MOCK_STAFF: Barber[] = [
+  {
+    id: "demo-admin",
+    name: "Você (Administrador)",
+    photo: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=250&auto=format&fit=crop",
+    role: "admin",
+    email: "barbeiro-demo@barbearia.com"
+  },
+  {
+    id: "barber-1",
+    name: "Thiago Cortes",
+    photo: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?q=80&w=250&auto=format&fit=crop",
+    role: "barber",
+    email: "thiago@barbearia.com"
+  },
+  {
+    id: "barber-2",
+    name: "Rodrigo Carvalho",
+    photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=250&auto=format&fit=crop",
+    role: "barber",
+    email: "rodrigo@barbearia.com"
+  }
+];
+
+const MOCK_APPOINTMENTS: Appointment[] = [
+  {
+    id: "app-1",
+    name: "Guilherme Silva",
+    phone: "(11) 99999-5555",
+    barberId: "barber-1",
+    barberName: "Thiago Cortes",
+    serviceId: "srv-1",
+    serviceType: "Corte Degradê",
+    time: "10:00",
+    date: getBrasiliaToday().toISOString().split('T')[0],
+    price: 50,
+    status: "confirmed",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "app-2",
+    name: "Felipe Almeida",
+    phone: "(11) 98888-4444",
+    barberId: "demo-admin",
+    barberName: "Você (Administrador)",
+    serviceId: "srv-2",
+    serviceType: "Barba com Toalha Quente",
+    time: "14:30",
+    date: getBrasiliaToday().toISOString().split('T')[0],
+    price: 45,
+    status: "pending",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "app-3",
+    name: "Bruno Souza",
+    phone: "(11) 97777-3333",
+    barberId: "barber-2",
+    barberName: "Rodrigo Carvalho",
+    serviceId: "srv-3",
+    serviceType: "Combo Cabelo + Barba Premium",
+    time: "16:00",
+    date: getBrasiliaToday().toISOString().split('T')[0],
+    price: 85,
+    status: "confirmed",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "app-4",
+    name: "Carlos Eduardo",
+    phone: "(11) 96666-2222",
+    barberId: "demo-admin",
+    barberName: "Você (Administrador)",
+    serviceId: "srv-1",
+    serviceType: "Corte Degradê",
+    time: "18:00",
+    date: getBrasiliaToday().toISOString().split('T')[0],
+    price: 50,
+    status: "cancelled",
+    createdAt: new Date().toISOString()
+  }
+];
+
 export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [userRole, setUserRole] = useState<'admin' | 'barber' | null>(null);
@@ -171,6 +254,8 @@ export default function App() {
   const [isTestimonialModalOpen, setIsTestimonialModalOpen] = useState(false);
   const [testimonialForm, setTestimonialForm] = useState({ name: '', text: '' });
   const [isSubmittingTestimonial, setIsSubmittingTestimonial] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [quickPassword, setQuickPassword] = useState('');
 
   const combinedTestimonials = useMemo(() => {
     const showDb = dbTestimonials.filter(t => t.approved !== false);
@@ -371,6 +456,19 @@ export default function App() {
       console.warn("Firestore is mock. Skipping barbers loading.");
       return;
     }
+    if (user?.uid === 'demo-admin') {
+      setBarbers(MOCK_STAFF);
+      setFormData(prev => {
+        if (prev.barberId) return prev;
+        const firstBarber = MOCK_STAFF[0];
+        return { 
+          ...prev, 
+          barberId: firstBarber.id, 
+          barberName: firstBarber.name 
+        };
+      });
+      return;
+    }
     let unsub: (() => void) | undefined;
     try {
       unsub = onSnapshot(collection(db, 'public_barbers'), (snapshot) => {
@@ -400,6 +498,10 @@ export default function App() {
   // Fetch Staff (Full Management Data - Only for Admin/Barber)
   useEffect(() => {
     if (!db || db._isMock) return;
+    if (user?.uid === 'demo-admin') {
+      setStaff(MOCK_STAFF);
+      return;
+    }
     let unsub: (() => void) | undefined;
     if (isAdmin || userRole === 'barber') {
       try {
@@ -421,6 +523,7 @@ export default function App() {
   // Keep public_barbers automatically synchronized in the background
   useEffect(() => {
     if (!db || db._isMock) return;
+    if (user?.uid === 'demo-admin') return;
     if (!isAdmin && userRole !== 'barber') return;
     if (staff.length === 0) return;
 
@@ -476,6 +579,10 @@ export default function App() {
   // Fetch Appointments (Admin/Barber specific)
   useEffect(() => {
     if (!db || db._isMock) return;
+    if (user?.uid === 'demo-admin') {
+      setAppointments(MOCK_APPOINTMENTS);
+      return;
+    }
     let unsubApps: () => void = () => {};
     
     if (user && userRole) {
@@ -834,8 +941,13 @@ export default function App() {
     return slots;
   }, [formData.date]);
 
-  const handleLogin = async () => {
-    const loginLoading = toast.loading('Iniciando login com Google...');
+  const handleLogin = () => {
+    setIsLoginModalOpen(true);
+  };
+
+  const handleActualGoogleLogin = async () => {
+    setIsLoginModalOpen(false);
+    const loginLoading = toast.loading('...Iniciando login com Google');
     try {
       await login();
       toast.success('Login realizado com sucesso!', { id: loginLoading });
@@ -863,8 +975,38 @@ export default function App() {
     }
   };
 
+  const handleQuickPasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (quickPassword === '12345') {
+       setUser({
+         uid: 'demo-admin',
+         displayName: 'Administrador Demo',
+         email: 'barbeiro-demo@barbearia.com',
+         photoURL: ''
+       });
+       setIsAdmin(true);
+       setUserRole('admin');
+       toggleDashboardView(true);
+       window.scrollTo(0, 0);
+       setIsLoginModalOpen(false);
+       setQuickPassword('');
+       toast.success('Acesso demonstrativo concedido!', {
+         icon: '🔑',
+         style: { background: '#18181b', color: '#fff', fontSize: '11px', textTransform: 'uppercase' }
+       });
+    } else {
+       toast.error('Senha de demonstração incorreta!');
+    }
+  };
+
    const handleLogout = async () => {
-    await logout();
+    if (user?.uid === 'demo-admin') {
+      setUser(null);
+      setIsAdmin(false);
+      setUserRole(null);
+    } else {
+      await logout();
+    }
     setIsDashboardView(false);
     toast.success("Você saiu do painel");
   };
@@ -880,6 +1022,13 @@ export default function App() {
   };
 
   const toggleUserRole = async (barberId: string, currentRole: 'admin' | 'barber') => {
+    if (user?.uid === 'demo-admin') {
+      const newRole = currentRole === 'admin' ? 'barber' : 'admin';
+      setStaff(prev => prev.map(s => s.id === barberId ? { ...s, role: newRole } : s));
+      setBarbers(prev => prev.map(s => s.id === barberId ? { ...s, role: newRole } : s));
+      toast.success('Permissão alterada (modo demonstração)');
+      return;
+    }
     if (!isAdmin) return;
     const newRole = currentRole === 'admin' ? 'barber' : 'admin';
     try {
@@ -906,6 +1055,18 @@ export default function App() {
 
   const removeBarber = async (barberId: string | null) => {
     if (!barberId) return;
+    if (user?.uid === 'demo-admin') {
+      if (barberId === user?.uid) {
+        toast.error('Você não pode remover a si mesmo da equipe');
+        setDeletingBarberId(null);
+        return;
+      }
+      setStaff(prev => prev.filter(s => s.id !== barberId));
+      setBarbers(prev => prev.filter(b => b.id !== barberId));
+      toast.success('Colaborador removido (modo demonstração)');
+      setDeletingBarberId(null);
+      return;
+    }
     console.log("Attempting to remove barber:", barberId);
     
     if (userRole !== 'admin' && !isAdmin) {
@@ -934,6 +1095,11 @@ export default function App() {
   };
 
   const updateStatus = async (id: string, newStatus: string) => {
+    if (user?.uid === 'demo-admin') {
+      setAppointments(prev => prev.map(app => app.id === id ? { ...app, status: newStatus } : app));
+      toast.success('Status atualizado! (modo demonstração)');
+      return;
+    }
     try {
       // Use setDoc with merge: true to avoid "No document to update" errors
       await setDoc(doc(db, 'appointments', id), { status: newStatus }, { merge: true });
@@ -947,6 +1113,11 @@ export default function App() {
 
   const deleteAppointment = async (id: string) => {
     if (!confirm('Deseja excluir este agendamento?')) return;
+    if (user?.uid === 'demo-admin') {
+      setAppointments(prev => prev.filter(app => app.id !== id));
+      toast.success('Agendamento excluído! (modo demonstração)');
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'appointments', id));
       // Sync with busy_slots (public tracking)
@@ -1028,6 +1199,110 @@ export default function App() {
                   Sim
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Login Modal */}
+      <AnimatePresence>
+        {isLoginModalOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsLoginModalOpen(false);
+                setQuickPassword('');
+              }}
+              className="absolute inset-0 bg-black/85 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="relative w-full max-w-md bg-neutral-950 border border-gold/20 p-8 rounded-lg shadow-2xl overflow-hidden"
+            >
+              {/* Decorative side line */}
+              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-gold to-transparent" />
+              
+              <button 
+                onClick={() => {
+                  setIsLoginModalOpen(false);
+                  setQuickPassword('');
+                }}
+                className="absolute top-5 right-5 text-white/40 hover:text-white transition-colors cursor-pointer"
+                id="close-login-modal-btn"
+                aria-label="Fechar login"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex flex-col items-center text-center mt-2 mb-8">
+                <RenderLogo url={siteData.logoUrl} size="md" className="mb-4 shadow-[0_0_20px_rgba(255,215,0,0.1)]" />
+                <h3 className="text-lg md:text-xl font-display font-medium tracking-[0.2em] text-white uppercase italic">
+                  Acesso ao Painel
+                </h3>
+                <p className="text-white/40 text-[9px] uppercase tracking-widest mt-1">
+                  Espaço exclusivo para equipe de barbeiros e administradores
+                </p>
+              </div>
+
+              {/* Quick Demo Login Form */}
+              <form onSubmit={handleQuickPasswordSubmit} className="space-y-5">
+                <div className="bg-white/5 border border-white/5 p-4 rounded-md text-center">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold/90 block mb-1">
+                    🔑 Visualização Rápida (Protótipo)
+                  </span>
+                  <p className="text-white/50 text-[10px] leading-relaxed">
+                    Insira a senha de teste abaixo para entrar instantaneamente como administrador e testar o painel.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-[9px] uppercase tracking-widest text-white/45 mb-2 block font-extrabold shadow-sm">
+                    Senha de Teste (Digite 12345)
+                  </label>
+                  <input 
+                    required
+                    type="password" 
+                    placeholder="•••••"
+                    value={quickPassword}
+                    onChange={e => setQuickPassword(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 p-3 h-12 rounded-sm focus:border-gold outline-none transition-all text-center font-mono text-xl tracking-[0.5em] text-gold" 
+                  />
+                </div>
+
+                <button 
+                  type="submit"
+                  className="w-full h-12 bg-gold hover:bg-white text-black font-semibold uppercase tracking-[0.2em] text-[10px] rounded-full transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(255,215,0,0.15)] hover:shadow-[0_0_35px_rgba(255,215,0,0.3)] cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4" /> Acessar Painel
+                </button>
+              </form>
+
+              {/* Disclaimer */}
+              <div className="mt-6 p-4 bg-red-500/5 border border-red-500/10 rounded-sm text-left">
+                <p className="text-[9.5px] leading-relaxed text-white/40">
+                  <strong className="text-white/60">⚠️ Nota sobre o Acesso:</strong> Esta senha (12345) é exclusiva para este protótipo de demonstração pública rápida. No protótipo final e em ambiente de produção real, o painel administrativo será protegido por logins individuais seguros com e-mail/senha criptografados e controle de privilégios.
+                </p>
+              </div>
+
+              <div className="relative flex py-4 items-center">
+                <div className="flex-grow border-t border-white/5"></div>
+                <span className="flex-shrink mx-4 text-[9px] text-white/30 uppercase tracking-[0.2em] font-medium">Ou Acesso Oficial</span>
+                <div className="flex-grow border-t border-white/5"></div>
+              </div>
+
+              {/* Real Admin Login */}
+              <button 
+                type="button"
+                onClick={handleActualGoogleLogin}
+                className="w-full h-12 bg-white/5 hover:bg-white/10 text-white hover:text-white font-medium uppercase tracking-[0.1em] text-[10px] rounded-sm border border-white/15 transition-all text-center flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Globe className="w-3.5 h-3.5 text-gold/80" /> Entrar com Google Account
+              </button>
             </motion.div>
           </div>
         )}

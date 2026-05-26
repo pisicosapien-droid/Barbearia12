@@ -9,6 +9,8 @@ export interface Appointment {
   time: string;
   status: 'pending' | 'confirmed' | 'cancelled';
   createdAt: any; // ServerTimestamp
+  price?: number;
+  serviceId?: string;
 }
 
 export interface Barber {
@@ -16,6 +18,7 @@ export interface Barber {
   name: string;
   email: string;
   role: 'admin' | 'barber';
+  photo?: string;
 }
 
 export interface Service {
